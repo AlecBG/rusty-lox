@@ -1,5 +1,6 @@
 use std::{env, fs::read, io::stdin, path::Path};
 
+use lox::parser::parser::Parser;
 use lox::scanner::scanner::{Error, Scanner};
 
 fn main() {
@@ -42,8 +43,14 @@ fn run(source: String) -> Result<(), Error> {
     println!("input: {}", &source);
     let mut scanner = Scanner::new(source);
     let tokens = scanner.scan_tokens();
-    for token in tokens {
-        println!("{:?}", token);
-    }
+    let mut parser = Parser::new(tokens);
+    let expression = parser.parse_expression();
+    match expression {
+        Ok(expr) => println!("Got the expression:\n{:?}", expr),
+        Err(err) => {
+            println!("Error: {:?}", err);
+            return Err(Error {});
+        }
+    };
     Ok(())
 }
