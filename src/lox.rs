@@ -1,4 +1,4 @@
-use std::{fs::read, io::stdin, path::Path};
+use std::{fs::read, io::stdin, io::{self, Write}, path::Path};
 
 use crate::interpreter::{Interpreter, RuntimeError};
 use crate::parser::{Parser, ParserError};
@@ -27,6 +27,8 @@ impl Lox {
     pub fn run_prompt(&mut self) {
         loop {
             let mut buffer = String::new();
+            print!("> ");
+            io::stdout().flush().unwrap();
             stdin().read_line(&mut buffer).unwrap();
             if &buffer == "" {
                 return;
@@ -34,14 +36,12 @@ impl Lox {
             let result = self.run(buffer);
             match result {
                 Ok(()) => {}
-                Err(e) => eprintln!("Error: {:?}", e),
+                Err(e) => {},
             }
         }
     }
 
     fn run(&mut self, source: String) -> Result<(), LoxError> {
-        println!("input: {}", &source);
-
         let mut scanner = Scanner::new(source);
         let tokens_result = scanner.scan_tokens();
         let tokens = match tokens_result {

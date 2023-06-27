@@ -130,12 +130,12 @@ impl Parser {
             let result_expression = self.unary();
             match result_expression {
                 Ok(expression) => {
-                    Expr::Unary {
+                    return Ok(Expr::Unary {
                         operator: unary_operator,
                         expression: Box::new(expression),
-                    };
+                    });
                 }
-                e => return e,
+                Err(e) => return Err(e),
             }
         }
         self.primary()
@@ -149,6 +149,7 @@ impl Parser {
             TokenType::Number(x) => Expr::Number(x),
             TokenType::String(x) => Expr::String(x),
             TokenType::LeftParen => {
+                self.advance();
                 let result_expr = self.parse_expression();
                 match result_expr {
                     Ok(expr) => {
