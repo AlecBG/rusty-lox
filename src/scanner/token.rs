@@ -6,7 +6,7 @@ use crate::scanner::token_type::TokenType;
 pub struct Token {
     pub token_type: TokenType,
     pub lexeme: Option<String>,
-    pub line: u64,
+    pub line: usize,
 }
 
 impl ToString for Token {

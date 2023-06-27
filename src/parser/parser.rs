@@ -1,5 +1,7 @@
-use crate::scanner::token::Token;
-use crate::scanner::token_type::TokenType;
+use std::convert::TryFrom;
+
+use crate::scanner::Token;
+use crate::scanner::TokenType;
 
 use super::expression::{BinaryOperator, Expr, UnaryOperator};
 

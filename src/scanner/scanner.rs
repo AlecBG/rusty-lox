@@ -10,7 +10,7 @@ pub struct Scanner {
     pub tokens: Vec<Token>,
     start: usize,
     current: usize,
-    line: u64,
+    line: usize,
     keywords: HashMap<String, TokenType>,
 }
 
@@ -47,16 +47,16 @@ impl Scanner {
         }
     }
 
-    pub fn scan_tokens(&mut self) -> Vec<Token> {
+    pub fn scan_tokens(&mut self) -> Result<Vec<Token>, SyntaxError> {
         while !self.is_at_end() {
             self.start = self.current;
             self.scan_token();
         }
         self.add_token(TokenType::EOF);
-        self.tokens.clone()
+        Ok(self.tokens.clone())
     }
 
-    fn scan_token(&mut self) {
+    fn scan_token(&mut self) -> Result<(), SyntaxError> {
         let c = self.advance();
         match c {
             '(' => self.add_token(TokenType::LeftParen),
@@ -110,9 +110,7 @@ impl Scanner {
             }
 
             // Ignore whitespace
-            ' ' => {}
-            '\r' => {}
-            '\t' => {}
+            ' ' | '\r' | '\t' => {}
 
             '\n' => {
                 self.line += 1;
@@ -122,8 +120,14 @@ impl Scanner {
             '0'..='9' => self.add_number_token(),
             'a'..='z' | 'A'..='Z' | '_' => self.add_identifier_token(),
 
-            _ => eprintln!("{} Unexpected character: '{}'", self.line, c),
+            _ => {
+                return Err(SyntaxError {
+                    message: format!("{} Unexpected character: '{}'", self.line, c),
+                    line: self.line,
+                });
+            }
         }
+        Ok(())
     }
 
     fn advance(&mut self) -> char {
@@ -236,12 +240,16 @@ fn is_alphanumeric(c: char) -> bool {
     is_digit(c) || is_alpha(c)
 }
 
-pub struct Error {}
+#[derive(Debug)]
+pub struct SyntaxError {
+    message: String,
+    line: usize,
+}
 
-fn error(line: u64, message: &str) {
+fn error(line: usize, message: &str) {
     report(line, "", message);
 }
 
-fn report(line: u64, where_: &str, message: &str) {
+fn report(line: usize, where_: &str, message: &str) {
     eprintln!("[line {line}] Error{where_}: {message}");
 }

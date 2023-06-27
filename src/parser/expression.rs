@@ -1,4 +1,4 @@
-use crate::scanner::token_type::TokenType;
+use crate::scanner::TokenType;
 use std::convert::TryFrom;
 
 #[derive(Debug)]
