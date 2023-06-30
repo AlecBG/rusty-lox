@@ -1,4 +1,4 @@
-use crate::parser::{BinaryOperator, Expr, UnaryOperator};
+use crate::parser::{BinaryOperator, Expr, Stmt, UnaryOperator};
 use std::string::ToString;
 
 #[derive(Debug)]
@@ -58,14 +58,35 @@ impl Interpreter {
         Self {}
     }
 
-    pub fn interpret(&mut self, expression: Expr) -> Result<(), RuntimeError> {
-        let value_result = self.evaluate(expression);
-        match value_result {
-            Ok(v) => {
-                println!("{}", v.to_string());
+    pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<(), RuntimeError> {
+        for statement in statements {
+            let res = self.execute(statement);
+            match res {
+                Ok(_) => {}
+                Err(e) => return Err(e),
+            };
+        }
+        Ok(())
+    }
+
+    fn execute(&mut self, statement: Stmt) -> Result<(), RuntimeError> {
+        match statement {
+            Stmt::Print(expr) => {
+                let value_result = self.evaluate(expr);
+                let value = match value_result {
+                    Ok(v) => v,
+                    Err(err) => return Err(err),
+                };
+                println!("{}", value.to_string());
                 Ok(())
             }
-            Err(e) => Err(e),
+            Stmt::Expression(expr) => {
+                let value_result = self.evaluate(expr);
+                match value_result {
+                    Ok(_) => Ok(()),
+                    Err(err) => return Err(err),
+                }
+            }
         }
     }
 

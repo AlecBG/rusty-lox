@@ -4,6 +4,7 @@ use crate::scanner::Token;
 use crate::scanner::TokenType;
 
 use super::expression::{BinaryOperator, Expr, UnaryOperator};
+use super::statement::Stmt;
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -16,12 +17,78 @@ pub struct ParserError {
     pub message: String,
 }
 
+#[derive(Debug)]
+pub struct ParserErrorLine {
+    pub line: usize,
+    pub error: ParserError,
+}
+
+#[derive(Debug)]
+pub struct ParserErrors {
+    pub errors: Vec<ParserErrorLine>,
+}
+
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Parser {
         Parser { tokens, current: 0 }
     }
 
-    pub fn parse_expression(&mut self) -> Result<Expr, ParserError> {
+    pub fn parse(&mut self) -> Result<Vec<Stmt>, ParserErrors> {
+        let mut statements: Vec<Stmt> = vec![];
+        let mut parser_errors_line: Vec<ParserErrorLine> = vec![];
+        let mut line = 1;
+        while !self.is_at_end() {
+            match self.parse_statement() {
+                Ok(stmt) => statements.push(stmt),
+                Err(error) => parser_errors_line.push(ParserErrorLine { line, error }),
+            }
+            line += 1;
+        }
+        if parser_errors_line.is_empty() {
+            Ok(statements)
+        } else {
+            Err(ParserErrors {
+                errors: parser_errors_line,
+            })
+        }
+    }
+
+    fn parse_statement(&mut self) -> Result<Stmt, ParserError> {
+        if self.matches(&[TokenType::Print]) {
+            self.parse_print_statement()
+        } else {
+            self.parse_expression_statement()
+        }
+    }
+
+    fn parse_print_statement(&mut self) -> Result<Stmt, ParserError> {
+        let value_result = self.parse_expression();
+        let value = match value_result {
+            Ok(expr) => expr,
+            Err(err) => return Err(err),
+        };
+        match self.consume(TokenType::Semicolon, "Expect ';' after value.") {
+            Ok(_) => {},
+            Err(err) => return Err(err)
+        };
+
+        Ok(Stmt::Print(value))
+    }
+
+    fn parse_expression_statement(&mut self) -> Result<Stmt, ParserError> {
+        let value_result = self.parse_expression();
+        let value = match value_result {
+            Ok(expr) => expr,
+            Err(err) => return Err(err),
+        };
+        match self.consume(TokenType::Semicolon, "Expect ';' after expression.") {
+            Ok(_) => {},
+            Err(err) => return Err(err)
+        };
+        Ok(Stmt::Expression(value))
+    }
+
+    fn parse_expression(&mut self) -> Result<Expr, ParserError> {
         self.equality()
     }
 

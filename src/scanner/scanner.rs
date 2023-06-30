@@ -50,7 +50,10 @@ impl Scanner {
     pub fn scan_tokens(&mut self) -> Result<Vec<Token>, SyntaxError> {
         while !self.is_at_end() {
             self.start = self.current;
-            self.scan_token();
+            match self.scan_token() {
+                Ok(_) => {},
+                Err(err) => return Err(err)
+            }
         }
         self.add_token(TokenType::EOF);
         Ok(self.tokens.clone())

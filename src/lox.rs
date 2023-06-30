@@ -1,12 +1,17 @@
-use std::{fs::read, io::stdin, io::{self, Write}, path::Path};
+use std::{
+    fs::read,
+    io::stdin,
+    io::{self, Write},
+    path::Path,
+};
 
 use crate::interpreter::{Interpreter, RuntimeError};
-use crate::parser::{Parser, ParserError};
+use crate::parser::{Parser, ParserErrors};
 use crate::scanner::{Scanner, SyntaxError};
 
 #[derive(Debug)]
 pub enum LoxError {
-    ParserError(ParserError),
+    ParserErrors(ParserErrors),
     SyntaxError(SyntaxError),
     RuntimeError(RuntimeError),
 }
@@ -19,7 +24,9 @@ impl Lox {
         let result = self.run(file_contents);
         match result {
             Ok(()) => {}
-            Err(LoxError::ParserError(_)) | Err(LoxError::SyntaxError(_)) => std::process::exit(65),
+            Err(LoxError::ParserErrors(_)) | Err(LoxError::SyntaxError(_)) => {
+                std::process::exit(65)
+            }
             Err(LoxError::RuntimeError(_)) => std::process::exit(70),
         }
     }
@@ -36,7 +43,7 @@ impl Lox {
             let result = self.run(buffer);
             match result {
                 Ok(()) => {}
-                Err(e) => {},
+                Err(_) => {}
             }
         }
     }
@@ -53,17 +60,17 @@ impl Lox {
         };
 
         let mut parser = Parser::new(tokens);
-        let expression_result = parser.parse_expression();
-        let expression = match expression_result {
-            Ok(expression) => expression,
+        let statements_results = parser.parse();
+        let statements = match statements_results {
+            Ok(s) => s,
             Err(err) => {
                 eprintln!("Error: {:?}", err);
-                return Err(LoxError::ParserError(err));
+                return Err(LoxError::ParserErrors(err));
             }
         };
 
         let mut interpreter = Interpreter::new();
-        let interpret_result = interpreter.interpret(expression);
+        let interpret_result = interpreter.interpret(statements);
         match interpret_result {
             Ok(()) => {}
             Err(err) => {
