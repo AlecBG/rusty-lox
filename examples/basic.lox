@@ -1,0 +1,9 @@
+var a = 1;
+print a = 2;
+var b = 4;
+print a + b;
+{
+    var c = 2;
+    print c;
+}
+print c;  // This throws a runtime error because `c` is not defined in this scope.

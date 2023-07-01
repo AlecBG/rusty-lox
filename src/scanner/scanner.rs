@@ -4,10 +4,14 @@ use super::token::Token;
 
 use super::token_type::TokenType;
 
-pub struct Scanner {
-    pub source: String,
+pub fn scan_tokens(source: String) -> Result<Vec<Token>, SyntaxError> {
+    let mut scanner = Scanner::new(source);
+    scanner.scan_tokens()
+}
+
+struct Scanner {
     source_chars: Vec<char>,
-    pub tokens: Vec<Token>,
+    tokens: Vec<Token>,
     start: usize,
     current: usize,
     line: usize,
@@ -15,9 +19,8 @@ pub struct Scanner {
 }
 
 impl Scanner {
-    pub fn new(source: String) -> Scanner {
-        let source_copy = (&source).to_string();
-        let source_chars: Vec<char> = source_copy.chars().collect();
+    fn new(source: String) -> Scanner {
+        let source_chars: Vec<char> = source.chars().collect();
         let keywords: HashMap<String, TokenType> = HashMap::from([
             ("and".to_string(), TokenType::And),
             ("class".to_string(), TokenType::Class),
@@ -37,7 +40,6 @@ impl Scanner {
             ("while".to_string(), TokenType::While),
         ]);
         Scanner {
-            source,
             source_chars,
             tokens: vec![],
             start: 0,
@@ -47,12 +49,12 @@ impl Scanner {
         }
     }
 
-    pub fn scan_tokens(&mut self) -> Result<Vec<Token>, SyntaxError> {
+    fn scan_tokens(&mut self) -> Result<Vec<Token>, SyntaxError> {
         while !self.is_at_end() {
             self.start = self.current;
             match self.scan_token() {
-                Ok(_) => {},
-                Err(err) => return Err(err)
+                Ok(_) => {}
+                Err(err) => return Err(err),
             }
         }
         self.add_token(TokenType::EOF);
@@ -142,7 +144,6 @@ impl Scanner {
     fn add_token(&mut self, token_type: TokenType) {
         self.tokens.push(Token {
             token_type,
-            lexeme: None,
             line: self.line,
         })
     }
@@ -245,8 +246,8 @@ fn is_alphanumeric(c: char) -> bool {
 
 #[derive(Debug)]
 pub struct SyntaxError {
-    message: String,
-    line: usize,
+    pub message: String,
+    pub line: usize,
 }
 
 fn error(line: usize, message: &str) {

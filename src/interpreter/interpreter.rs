@@ -1,9 +1,10 @@
 use crate::parser::{BinaryOperator, Expr, Stmt, UnaryOperator};
+use std::collections::HashMap;
 use std::string::ToString;
 
 #[derive(Debug)]
 pub struct RuntimeError {
-    message: String,
+    pub message: String,
 }
 
 #[derive(Debug, PartialEq)]
@@ -14,7 +15,7 @@ enum ValueType {
     Nil,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Value {
     Number(f64),
     String(String),
@@ -51,48 +52,163 @@ impl ToString for Value {
     }
 }
 
-pub struct Interpreter {}
+#[derive(Debug)]
+pub struct Environment {
+    enclosing_environment: Option<Box<Environment>>,
+    values: HashMap<String, Value>,
+}
+
+impl<'a> Environment {
+    pub fn new() -> Self {
+        Environment {
+            enclosing_environment: None,
+            values: HashMap::new(),
+        }
+    }
+
+    fn create_enclosed_environment(self) -> Environment {
+        Environment {
+            enclosing_environment: Some(Box::new(self)),
+            values: HashMap::new(),
+        }
+    }
+
+    fn define(&mut self, name: String, value: Value) {
+        self.values.insert(name.clone(), value.clone());
+    }
+
+    fn assign(&mut self, name: String, value: Value) -> Result<(), RuntimeError> {
+        if self.values.contains_key(&name) {
+            self.values.insert(name, value);
+            Ok(())
+        } else {
+            match &mut self.enclosing_environment {
+                Some(environment) => environment.assign(name, value),
+                None => Err(RuntimeError {
+                    message: format!("Undefined variable '{}'.", name),
+                }),
+            }
+        }
+    }
+
+    fn get(&self, name: &str) -> Result<Value, RuntimeError> {
+        match self.values.get(name) {
+            Some(v) => Ok(v.clone()),
+            None => match &self.enclosing_environment {
+                Some(environment) => environment.get(name),
+                None => Err(RuntimeError {
+                    message: format!("Undefined variable '{}'.", { name }),
+                }),
+            },
+        }
+    }
+}
+
+pub fn interpret(statements: Vec<Stmt>) -> Result<(), RuntimeError> {
+    match interpret_with_optional_environment(statements, None) {
+        Ok(_) => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+pub fn interpret_with_environment(
+    statements: Vec<Stmt>,
+    environment: Environment,
+) -> Result<Environment, (Environment, RuntimeError)> {
+    let mut interpreter = Interpreter::new(Some(environment));
+    for statement in statements {
+        let res = interpreter.execute(statement);
+        interpreter = match res {
+            Ok(i) => i,
+            Err((i, e)) => return Err((i.environment, e)),
+        };
+    }
+    Ok(interpreter.environment)
+}
+
+fn interpret_with_optional_environment(
+    statements: Vec<Stmt>,
+    optional_environment: Option<Environment>,
+) -> Result<Option<Environment>, RuntimeError> {
+    let mut interpreter = Interpreter::new(optional_environment);
+    for statement in statements {
+        let res = interpreter.execute(statement);
+        interpreter = match res {
+            Ok(i) => i,
+            Err((_, e)) => return Err(e),
+        };
+    }
+    match interpreter.environment.enclosing_environment {
+        Some(env) => Ok(Some(*env)),
+        None => Ok(None),
+    }
+}
+
+struct Interpreter {
+    environment: Environment,
+}
 
 impl Interpreter {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<(), RuntimeError> {
-        for statement in statements {
-            let res = self.execute(statement);
-            match res {
-                Ok(_) => {}
-                Err(e) => return Err(e),
-            };
+    pub fn new(optional_environment: Option<Environment>) -> Self {
+        match optional_environment {
+            Some(environment) => Self {
+                environment: Environment::create_enclosed_environment(environment),
+            },
+            None => Interpreter {
+                environment: Environment::new(),
+            },
         }
-        Ok(())
     }
 
-    fn execute(&mut self, statement: Stmt) -> Result<(), RuntimeError> {
+    fn execute(mut self, statement: Stmt) -> Result<Interpreter, (Interpreter, RuntimeError)> {
         match statement {
+            Stmt::Block(statements) => {
+                match interpret_with_optional_environment(statements, Some(self.environment)) {
+                    Ok(optional_environment) => Ok(Interpreter::new(optional_environment)),
+                    // TODO: Figure out how to get a prompt environment to have a block statement throw a runtime error and not reset the state.
+                    Err(err) => return Err((Interpreter::new(None), err)),
+                }
+            }
             Stmt::Print(expr) => {
                 let value_result = self.evaluate(expr);
                 let value = match value_result {
                     Ok(v) => v,
-                    Err(err) => return Err(err),
+                    Err(err) => return Err((self, err)),
                 };
                 println!("{}", value.to_string());
-                Ok(())
+                Ok(self)
             }
             Stmt::Expression(expr) => {
                 let value_result = self.evaluate(expr);
                 match value_result {
-                    Ok(_) => Ok(()),
-                    Err(err) => return Err(err),
+                    Ok(_) => Ok(self),
+                    Err(err) => return Err((self, err)),
                 }
+            }
+            Stmt::Var { name, initializer } => {
+                let value = match self.evaluate(initializer) {
+                    Ok(v) => v,
+                    Err(err) => return Err((self, err)),
+                };
+                self.environment.define(name, value);
+                Ok(self)
             }
         }
     }
 
-    /// Later will have some global state that will be mutated, hence has mutable reference to self.
     fn evaluate(&mut self, expression: Expr) -> Result<Value, RuntimeError> {
         match expression {
+            Expr::Assign { name, expression } => {
+                let value = match self.evaluate(*expression) {
+                    Ok(v) => v,
+                    Err(err) => return Err(err),
+                };
+                match self.environment.assign(name, value.clone()) {
+                    Ok(_) => {}
+                    Err(err) => return Err(err),
+                };
+                Ok(value)
+            }
             Expr::Binary {
                 left,
                 operator,
@@ -107,6 +223,7 @@ impl Interpreter {
             Expr::String(x) => Ok(Value::String(x)),
             Expr::Boolean(x) => Ok(Value::Boolean(x)),
             Expr::Nil => Ok(Value::Nil),
+            Expr::Variable(name) => self.environment.get(&name),
         }
     }
 

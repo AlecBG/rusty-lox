@@ -5,9 +5,9 @@ use std::{
     path::Path,
 };
 
-use crate::interpreter::{Interpreter, RuntimeError};
-use crate::parser::{Parser, ParserErrors};
-use crate::scanner::{Scanner, SyntaxError};
+use crate::interpreter::{interpret, interpret_with_environment, Environment, RuntimeError};
+use crate::parser::{parse, ParserErrors};
+use crate::scanner::{scan_tokens, SyntaxError};
 
 #[derive(Debug)]
 pub enum LoxError {
@@ -16,69 +16,86 @@ pub enum LoxError {
     RuntimeError(RuntimeError),
 }
 
-pub struct Lox {}
-
-impl Lox {
-    pub fn run_file(&mut self, path: &Path) {
-        let file_contents = String::from_utf8(read(path).unwrap()).unwrap();
-        let result = self.run(file_contents);
-        match result {
-            Ok(()) => {}
-            Err(LoxError::ParserErrors(_)) | Err(LoxError::SyntaxError(_)) => {
-                std::process::exit(65)
-            }
-            Err(LoxError::RuntimeError(_)) => std::process::exit(70),
-        }
+pub fn run_file(path: &Path) {
+    let file_contents = String::from_utf8(read(path).unwrap()).unwrap();
+    let result = run(file_contents);
+    match result {
+        Ok(()) => {}
+        Err(LoxError::ParserErrors(_)) | Err(LoxError::SyntaxError(_)) => std::process::exit(65),
+        Err(LoxError::RuntimeError(_)) => std::process::exit(70),
     }
+}
 
-    pub fn run_prompt(&mut self) {
-        loop {
-            let mut buffer = String::new();
-            print!("> ");
-            io::stdout().flush().unwrap();
-            stdin().read_line(&mut buffer).unwrap();
-            if &buffer == "" {
-                return;
-            }
-            let result = self.run(buffer);
-            match result {
-                Ok(()) => {}
-                Err(_) => {}
-            }
+pub fn run_prompt() {
+    let mut prompt_environment = Environment::new();
+    loop {
+        let mut buffer = String::new();
+        print!("> ");
+        io::stdout().flush().unwrap();
+        stdin().read_line(&mut buffer).unwrap();
+        if &buffer == "" {
+            return;
         }
-    }
-
-    fn run(&mut self, source: String) -> Result<(), LoxError> {
-        let mut scanner = Scanner::new(source);
-        let tokens_result = scanner.scan_tokens();
-        let tokens = match tokens_result {
+        let tokens = match scan_tokens(buffer) {
             Ok(x) => x,
             Err(err) => {
                 eprintln!("Error: {:?}", err);
-                return Err(LoxError::SyntaxError(err));
+                continue;
             }
         };
-
-        let mut parser = Parser::new(tokens);
-        let statements_results = parser.parse();
-        let statements = match statements_results {
-            Ok(s) => s,
+        let statements_result = parse(tokens);
+        let statements = match statements_result {
+            Ok(statements) => {
+                if statements.len() > 1 {
+                    eprintln!("Only one statement per line allowed");
+                    continue;
+                }
+                if statements.len() == 0 {
+                    continue;
+                }
+                statements
+            }
             Err(err) => {
                 eprintln!("Error: {:?}", err);
-                return Err(LoxError::ParserErrors(err));
+                continue;
             }
         };
-
-        let mut interpreter = Interpreter::new();
-        let interpret_result = interpreter.interpret(statements);
-        match interpret_result {
-            Ok(()) => {}
-            Err(err) => {
+        let result = interpret_with_environment(statements, prompt_environment);
+        prompt_environment = match result {
+            Ok(environment) => environment,
+            Err((env, err)) => {
                 eprintln!("Error: {:?}", err);
-                return Err(LoxError::RuntimeError(err));
+                env
             }
         };
-
-        Ok(())
     }
+}
+
+fn run(source: String) -> Result<(), LoxError> {
+    let tokens = match scan_tokens(source) {
+        Ok(x) => x,
+        Err(err) => {
+            eprintln!("Error: {:?}", err);
+            return Err(LoxError::SyntaxError(err));
+        }
+    };
+
+    let statements = match parse(tokens) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("Error: {:?}", err);
+            return Err(LoxError::ParserErrors(err));
+        }
+    };
+
+    let interpret_result = interpret(statements);
+    match interpret_result {
+        Ok(_) => {}
+        Err(err) => {
+            eprintln!("Error: {:?}", err);
+            return Err(LoxError::RuntimeError(err));
+        }
+    };
+
+    Ok(())
 }

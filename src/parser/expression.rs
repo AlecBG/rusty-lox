@@ -55,6 +55,10 @@ impl TryFrom<TokenType> for UnaryOperator {
 
 #[derive(Debug)]
 pub enum Expr {
+    Assign {
+        name: String,
+        expression: Box<Expr>,
+    },
     Binary {
         left: Box<Expr>,
         operator: BinaryOperator,
@@ -70,4 +74,6 @@ pub enum Expr {
     String(String),
     Boolean(bool),
     Nil,
+
+    Variable(String),
 }
