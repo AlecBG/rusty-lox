@@ -32,6 +32,13 @@ impl Value {
             Value::Nil => ValueType::Nil,
         }
     }
+
+    fn is_truthy(&self) -> bool {
+        match self {
+            Self::Nil | Self::Boolean(false) => false,
+            _ => true,
+        }
+    }
 }
 
 impl ToString for Value {
@@ -168,6 +175,44 @@ impl Interpreter {
                     // TODO: Figure out how to get a prompt environment to have a block statement throw a runtime error and not reset the state.
                     Err(err) => return Err((Interpreter::new(None), err)),
                 }
+            }
+            Stmt::If {
+                condition,
+                then_stmt,
+                else_stmt,
+            } => {
+                let condition_value_result = self.evaluate(condition);
+                let condition_value = match condition_value_result {
+                    Ok(value) => value,
+                    Err(err) => return Err((self, err)),
+                };
+                let interpreter = match condition_value.is_truthy() {
+                    true => {
+                        match interpret_with_optional_environment(
+                            vec![*then_stmt],
+                            Some(self.environment),
+                        ) {
+                            Ok(optional_environment) => Interpreter::new(optional_environment),
+                            // TODO: Figure out how to get a prompt environment to have a block statement throw a runtime error and not reset the state.
+                            Err(err) => return Err((Interpreter::new(None), err)),
+                        }
+                    }
+                    false => {
+                        match else_stmt {
+                            Some(stmt) => match interpret_with_optional_environment(
+                                vec![*stmt],
+                                Some(self.environment),
+                            ) {
+                                Ok(optional_environment) => Interpreter::new(optional_environment),
+                                // TODO: Figure out how to get a prompt environment to have a block statement throw a runtime error and not reset the state.
+                                Err(err) => return Err((Interpreter::new(None), err)),
+                            },
+                            None => self,
+                        }
+                    }
+                };
+
+                Ok(interpreter)
             }
             Stmt::Print(expr) => {
                 let value_result = self.evaluate(expr);

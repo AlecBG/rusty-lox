@@ -103,13 +103,46 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> Result<Stmt, ParserError> {
-        if self.matches(&[TokenType::Print]) {
+        if self.matches(&[TokenType::If]) {
+            self.parse_if_statement()
+        } else if self.matches(&[TokenType::Print]) {
             self.parse_print_statement()
         } else if self.matches(&[TokenType::LeftBrace]) {
             self.parse_block_statement()
         } else {
             self.parse_expression_statement()
         }
+    }
+
+    fn parse_if_statement(&mut self) -> Result<Stmt, ParserError> {
+        match self.consume(TokenType::LeftParen, "Expect '(' after if.") {
+            Ok(_) => {}
+            Err(err) => return Err(err),
+        };
+        let condition = match self.parse_expression() {
+            Ok(expr) => expr,
+            Err(err) => return Err(err),
+        };
+        match self.consume(TokenType::RightParen, "Expect ')' after if condition.") {
+            Ok(_) => {}
+            Err(err) => return Err(err),
+        };
+        let then_stmt = match self.parse_statement() {
+            Ok(stmt) => Box::new(stmt),
+            Err(err) => return Err(err),
+        };
+        let else_stmt = match self.matches(&[TokenType::Else]) {
+            true => match self.parse_statement() {
+                Ok(stmt) => Some(Box::new(stmt)),
+                Err(err) => return Err(err),
+            },
+            false => None,
+        };
+        Ok(Stmt::If {
+            condition,
+            then_stmt,
+            else_stmt,
+        })
     }
 
     fn parse_print_statement(&mut self) -> Result<Stmt, ParserError> {
@@ -358,7 +391,7 @@ impl Parser {
                 }
                 _ => {
                     if self.is_at_end() {
-                        return
+                        return;
                     }
                     self.advance();
                 }
