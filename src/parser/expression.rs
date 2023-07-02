@@ -36,6 +36,24 @@ impl TryFrom<TokenType> for BinaryOperator {
 }
 
 #[derive(Debug)]
+pub enum LogicalOperator {
+    And,
+    Or,
+}
+
+impl TryFrom<TokenType> for LogicalOperator {
+    type Error = ();
+
+    fn try_from(value: TokenType) -> Result<Self, Self::Error> {
+        match value {
+            TokenType::And => Ok(LogicalOperator::And),
+            TokenType::Or => Ok(LogicalOperator::Or),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum UnaryOperator {
     Minus,
     Bang,
@@ -62,6 +80,11 @@ pub enum Expr {
     Binary {
         left: Box<Expr>,
         operator: BinaryOperator,
+        right: Box<Expr>,
+    },
+    LogicalOperator {
+        left: Box<Expr>,
+        operator: LogicalOperator,
         right: Box<Expr>,
     },
     Unary {

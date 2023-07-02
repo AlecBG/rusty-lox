@@ -1,4 +1,4 @@
-use crate::parser::{BinaryOperator, Expr, Stmt, UnaryOperator};
+use crate::parser::{BinaryOperator, Expr, LogicalOperator, Stmt, UnaryOperator};
 use std::collections::HashMap;
 use std::string::ToString;
 
@@ -259,6 +259,11 @@ impl Interpreter {
                 operator,
                 right,
             } => self.evaluate_binary_expression(*left, *right, operator),
+            Expr::LogicalOperator {
+                left,
+                operator,
+                right,
+            } => self.evaluate_logical_operator_expression(*left, *right, operator),
             Expr::Unary {
                 operator,
                 expression,
@@ -384,6 +389,35 @@ impl Interpreter {
                     message: format!("Cannot divide {:?} by {:?}", lv.get_type(), rv.get_type()),
                 }),
             },
+        }
+    }
+
+    fn evaluate_logical_operator_expression(
+        &mut self,
+        left_expression: Expr,
+        right_expression: Expr,
+        operator: LogicalOperator,
+    ) -> Result<Value, RuntimeError> {
+        let left_value_result = self.evaluate(left_expression);
+        let left_value = match left_value_result {
+            Ok(v) => v,
+            Err(e) => return Err(e),
+        };
+        match operator {
+            LogicalOperator::And => {
+                if !left_value.is_truthy() {
+                    Ok(Value::Boolean(false))
+                } else {
+                    self.evaluate(right_expression)
+                }
+            }
+            LogicalOperator::Or => {
+                if left_value.is_truthy() {
+                    self.evaluate(right_expression)
+                } else {
+                    Ok(left_value)
+                }
+            }
         }
     }
 

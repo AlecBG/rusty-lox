@@ -121,7 +121,10 @@ impl Scanner {
                 self.line += 1;
             }
 
-            '"' => self.add_string_token(),
+            '"' => match self.add_string_token() {
+                Ok(_) => {}
+                Err(err) => return Err(err),
+            },
             '0'..='9' => self.add_number_token(),
             'a'..='z' | 'A'..='Z' | '_' => self.add_identifier_token(),
 
@@ -148,7 +151,7 @@ impl Scanner {
         })
     }
 
-    fn add_string_token(&mut self) {
+    fn add_string_token(&mut self) -> Result<(), SyntaxError> {
         while self.peek() != '"' && !self.is_at_end() {
             if self.peek() == '\n' {
                 self.line += 1
@@ -157,12 +160,17 @@ impl Scanner {
         }
         if self.is_at_end() {
             error(self.line, "Unterminated string.");
+            return Err(SyntaxError {
+                message: "Unterminated string.".to_string(),
+                line: self.line,
+            });
         }
         self.advance(); // The closing '"'
         let string_value: String = self.source_chars[self.start + 1..self.current - 1]
             .into_iter()
             .collect();
-        self.add_token(TokenType::String(string_value))
+        self.add_token(TokenType::String(string_value));
+        Ok(())
     }
 
     fn add_number_token(&mut self) {

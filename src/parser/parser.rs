@@ -5,6 +5,7 @@ use crate::scanner::TokenType;
 
 use super::expression::{BinaryOperator, Expr, UnaryOperator};
 use super::statement::Stmt;
+use super::LogicalOperator;
 
 #[derive(Debug)]
 pub struct ParserError {
@@ -195,7 +196,7 @@ impl Parser {
     }
 
     fn parse_assignment(&mut self) -> Result<Expr, ParserError> {
-        let expression = match self.parse_equality() {
+        let expression = match self.parse_or() {
             Ok(e) => e,
             Err(err) => return Err(err),
         };
@@ -218,6 +219,50 @@ impl Parser {
                     })
                 }
             };
+        }
+        Ok(expression)
+    }
+
+    fn parse_or(&mut self) -> Result<Expr, ParserError> {
+        let mut expression = match self.parse_and() {
+            Ok(e) => e,
+            Err(err) => return Err(err),
+        };
+        if self.matches(&[TokenType::Or]) {
+            let previous_token = self.previous(); // We know this is now or
+            let operator = LogicalOperator::try_from(previous_token.token_type.clone()).unwrap();
+            let right_result = self.parse_and();
+            let right = match right_result {
+                Ok(expr) => expr,
+                Err(err) => return Err(err),
+            };
+            expression = Expr::LogicalOperator {
+                left: Box::new(expression),
+                operator,
+                right: Box::new(right),
+            }
+        }
+        Ok(expression)
+    }
+
+    fn parse_and(&mut self) -> Result<Expr, ParserError> {
+        let mut expression = match self.parse_equality() {
+            Ok(e) => e,
+            Err(err) => return Err(err),
+        };
+        if self.matches(&[TokenType::And]) {
+            let previous_token = self.previous(); // We know this is now and
+            let operator = LogicalOperator::try_from(previous_token.token_type.clone()).unwrap();
+            let right_result = self.parse_equality();
+            let right = match right_result {
+                Ok(expr) => expr,
+                Err(err) => return Err(err),
+            };
+            expression = Expr::LogicalOperator {
+                left: Box::new(expression),
+                operator,
+                right: Box::new(right),
+            }
         }
         Ok(expression)
     }
