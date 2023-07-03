@@ -238,6 +238,26 @@ impl Interpreter {
                 self.environment.define(name, value);
                 Ok(self)
             }
+            Stmt::While { condition, body } => {
+                let mut interpreter = self;
+                // let mut condition_c: Expr = condition.clone();
+                while {
+                    match interpreter.evaluate(condition.clone()) {
+                        Ok(value) => value.is_truthy(),
+                        Err(err) => return Err((Interpreter::new(None), err)),
+                    }
+                } {
+                    interpreter = match interpret_with_optional_environment(
+                        vec![*body.clone()],
+                        Some(interpreter.environment),
+                    ) {
+                        Ok(optional_environment) => Interpreter::new(optional_environment),
+                        // TODO: Figure out how to get a prompt environment to have a block statement throw a runtime error and not reset the state.
+                        Err(err) => return Err((Interpreter::new(None), err)),
+                    }
+                }
+                Ok(interpreter)
+            }
         }
     }
 

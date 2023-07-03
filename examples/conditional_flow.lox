@@ -1,0 +1,14 @@
+var x = false or "hello world!";
+print x;
+
+var i = 0;
+while (i < 10) {
+    print i;
+    i = i + 1;
+}
+print "At end of loop";
+print i;
+
+for (var j = 10; j > 0; j = j - 3) {
+    print j;
+}

@@ -104,15 +104,96 @@ impl Parser {
     }
 
     fn parse_statement(&mut self) -> Result<Stmt, ParserError> {
-        if self.matches(&[TokenType::If]) {
+        if self.matches(&[TokenType::For]) {
+            self.parse_for_statement()
+        } else if self.matches(&[TokenType::If]) {
             self.parse_if_statement()
         } else if self.matches(&[TokenType::Print]) {
             self.parse_print_statement()
+        } else if self.matches(&[TokenType::While]) {
+            self.parse_while_statement()
         } else if self.matches(&[TokenType::LeftBrace]) {
             self.parse_block_statement()
         } else {
             self.parse_expression_statement()
         }
+    }
+
+    fn parse_for_statement(&mut self) -> Result<Stmt, ParserError> {
+        match self.consume(TokenType::LeftParen, "Expect '(' after for.") {
+            Ok(_) => {}
+            Err(err) => return Err(err),
+        };
+        let initializer = if self.matches(&[TokenType::Semicolon]) {
+            None
+        } else if self.matches(&[TokenType::Var]) {
+            let stmt = match self.parse_variable_declaration() {
+                Ok(s) => s,
+                Err(err) => return Err(err),
+            };
+            Some(stmt)
+        } else {
+            let stmt = match self.parse_expression_statement() {
+                Ok(s) => s,
+                Err(err) => return Err(err),
+            };
+            Some(stmt)
+        };
+
+        let condition = match self.matches(&[TokenType::Semicolon]) {
+            false => {
+                let expr = match self.parse_expression() {
+                    Ok(expr) => expr,
+                    Err(err) => return Err(err),
+                };
+                Some(expr)
+            }
+            true => None,
+        };
+        match self.consume(TokenType::Semicolon, "Expect ';' after loop condition.") {
+            Ok(_) => {}
+            Err(err) => return Err(err),
+        };
+
+        let increment = match self.matches(&[TokenType::RightParen]) {
+            false => {
+                let expr = match self.parse_expression() {
+                    Ok(expr) => expr,
+                    Err(err) => return Err(err),
+                };
+                Some(expr)
+            }
+            true => None,
+        };
+        match self.consume(TokenType::RightParen, "Expect ')' after for clauses") {
+            Ok(_) => {}
+            Err(err) => return Err(err),
+        };
+
+        let mut body = match self.parse_statement() {
+            Ok(s) => s,
+            Err(err) => return Err(err),
+        };
+
+        body = match increment {
+            Some(expr) => Stmt::Block(vec![body, Stmt::Expression(expr)]),
+            None => body,
+        };
+        body = match condition {
+            Some(expr) => Stmt::While {
+                condition: expr,
+                body: Box::new(body),
+            },
+            None => Stmt::While {
+                condition: Expr::Boolean(true),
+                body: Box::new(body),
+            },
+        };
+        body = match initializer {
+            Some(stmt) => Stmt::Block(vec![stmt, body]),
+            None => body,
+        };
+        Ok(body)
     }
 
     fn parse_if_statement(&mut self) -> Result<Stmt, ParserError> {
@@ -158,6 +239,31 @@ impl Parser {
         };
 
         Ok(Stmt::Print(value))
+    }
+
+    fn parse_while_statement(&mut self) -> Result<Stmt, ParserError> {
+        match self.consume(TokenType::LeftParen, "Expect '(' after 'while'.") {
+            Ok(_) => {}
+            Err(err) => return Err(err),
+        };
+        let condition_result = self.parse_expression();
+        let condition = match condition_result {
+            Ok(expr) => expr,
+            Err(err) => return Err(err),
+        };
+        match self.consume(TokenType::RightParen, "Expect ')' after condition.") {
+            Ok(_) => {}
+            Err(err) => return Err(err),
+        };
+        let body_result = self.parse_statement();
+        let body = match body_result {
+            Ok(stmt) => stmt,
+            Err(err) => return Err(err),
+        };
+        Ok(Stmt::While {
+            condition,
+            body: Box::new(body),
+        })
     }
 
     fn parse_block_statement(&mut self) -> Result<Stmt, ParserError> {

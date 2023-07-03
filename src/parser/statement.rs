@@ -1,6 +1,6 @@
 use crate::parser::expression::Expr;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Stmt {
     Block(Vec<Stmt>),
     Expression(Expr),
@@ -13,5 +13,9 @@ pub enum Stmt {
         condition: Expr,
         then_stmt: Box<Stmt>,
         else_stmt: Option<Box<Stmt>>,
+    },
+    While {
+        condition: Expr,
+        body: Box<Stmt>,
     },
 }
