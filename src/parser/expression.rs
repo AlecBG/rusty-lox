@@ -1,4 +1,4 @@
-use crate::scanner::TokenType;
+use crate::scanner::{Token, TokenType};
 use std::convert::TryFrom;
 
 #[derive(Clone, Debug)]
@@ -81,6 +81,11 @@ pub enum Expr {
         left: Box<Expr>,
         operator: BinaryOperator,
         right: Box<Expr>,
+    },
+    Call {
+        callee: Box<Expr>,
+        paren: Token,
+        arguments: Vec<Expr>,
     },
     LogicalOperator {
         left: Box<Expr>,

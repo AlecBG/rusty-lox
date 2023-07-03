@@ -1,26 +1,35 @@
 use crate::parser::{BinaryOperator, Expr, LogicalOperator, Stmt, UnaryOperator};
+use crate::scanner::Token;
+use std::cmp::PartialEq;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::string::ToString;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
 pub struct RuntimeError {
     pub message: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum ValueType {
     Number,
     String,
     Boolean,
     Nil,
+    Callable { num_args: usize },
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone)]
 enum Value {
     Number(f64),
     String(String),
     Boolean(bool),
     Nil,
+    Callable {
+        f: fn(&mut Interpreter, Vec<Value>) -> Value,
+        num_args: usize,
+    },
 }
 
 impl Value {
@@ -30,6 +39,9 @@ impl Value {
             Value::String(_) => ValueType::String,
             Value::Boolean(_) => ValueType::Boolean,
             Value::Nil => ValueType::Nil,
+            Value::Callable { f: _, num_args } => ValueType::Callable {
+                num_args: num_args.clone(),
+            },
         }
     }
 
@@ -37,6 +49,31 @@ impl Value {
         match self {
             Self::Nil | Self::Boolean(false) => false,
             _ => true,
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Number(l0), Self::Number(r0)) => l0 == r0,
+            (Self::String(l0), Self::String(r0)) => l0 == r0,
+            (Self::Boolean(l0), Self::Boolean(r0)) => l0 == r0,
+            // todo: Allow better comparison of functions
+            (Self::Callable { f: _, num_args: _ }, Self::Callable { f: _, num_args: _ }) => false,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+impl Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Number(arg0) => f.debug_tuple("Number").field(arg0).finish(),
+            Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
+            Self::Boolean(arg0) => f.debug_tuple("Boolean").field(arg0).finish(),
+            Self::Nil => write!(f, "Nil"),
+            Self::Callable { f: _, num_args } => f.debug_tuple("Callable").field(num_args).finish(),
         }
     }
 }
@@ -55,8 +92,26 @@ impl ToString for Value {
             Value::String(x) => x.to_string(),
             Value::Boolean(x) => x.to_string(),
             Value::Nil => "nil".to_string(),
+            Value::Callable { f: _, num_args } => format!("Function {:?} args", num_args),
         }
     }
+}
+
+fn construct_global_values() -> HashMap<String, Value> {
+    // fn clock_function(_: &mut Interr)
+
+    let clock = Value::Callable {
+        f: |_: &mut Interpreter, _: Vec<Value>| {
+            Value::Number(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs_f64(),
+            )
+        },
+        num_args: 0,
+    };
+    HashMap::from([("clock".to_string(), clock)])
 }
 
 #[derive(Debug)]
@@ -69,7 +124,7 @@ impl<'a> Environment {
     pub fn new() -> Self {
         Environment {
             enclosing_environment: None,
-            values: HashMap::new(),
+            values: construct_global_values(),
         }
     }
 
@@ -264,14 +319,8 @@ impl Interpreter {
     fn evaluate(&mut self, expression: Expr) -> Result<Value, RuntimeError> {
         match expression {
             Expr::Assign { name, expression } => {
-                let value = match self.evaluate(*expression) {
-                    Ok(v) => v,
-                    Err(err) => return Err(err),
-                };
-                match self.environment.assign(name, value.clone()) {
-                    Ok(_) => {}
-                    Err(err) => return Err(err),
-                };
+                let value = self.evaluate(*expression)?;
+                self.environment.assign(name, value.clone())?;
                 Ok(value)
             }
             Expr::Binary {
@@ -279,6 +328,11 @@ impl Interpreter {
                 operator,
                 right,
             } => self.evaluate_binary_expression(*left, *right, operator),
+            Expr::Call {
+                callee,
+                paren,
+                arguments,
+            } => self.evaluate_call_expression(*callee, paren, arguments),
             Expr::LogicalOperator {
                 left,
                 operator,
@@ -412,17 +466,45 @@ impl Interpreter {
         }
     }
 
+    fn evaluate_call_expression(
+        &mut self,
+        callee_expr: Expr,
+        paren: Token,
+        arguments: Vec<Expr>,
+    ) -> Result<Value, RuntimeError> {
+        let callee_value = self.evaluate(callee_expr)?;
+        let mut args = vec![];
+        for arg_expr in arguments {
+            args.push(self.evaluate(arg_expr)?);
+        }
+
+        let (callee, num_args) = match callee_value {
+            Value::Callable { f, num_args } => (f, num_args),
+            _ => {
+                return Err(RuntimeError {
+                    message: format!("Can only call functions and classes at {:?}", paren),
+                })
+            }
+        };
+        let arg_length = args.len();
+        if arg_length != num_args {
+            return Err(RuntimeError {
+                message: format!(
+                    "Expected {} arguments, but received {}.",
+                    num_args, arg_length
+                ),
+            });
+        }
+        Ok(callee(self, args))
+    }
+
     fn evaluate_logical_operator_expression(
         &mut self,
         left_expression: Expr,
         right_expression: Expr,
         operator: LogicalOperator,
     ) -> Result<Value, RuntimeError> {
-        let left_value_result = self.evaluate(left_expression);
-        let left_value = match left_value_result {
-            Ok(v) => v,
-            Err(e) => return Err(e),
-        };
+        let left_value = self.evaluate(left_expression)?;
         match operator {
             LogicalOperator::And => {
                 if !left_value.is_truthy() {
@@ -446,11 +528,7 @@ impl Interpreter {
         expression: Expr,
         operator: UnaryOperator,
     ) -> Result<Value, RuntimeError> {
-        let value_result = self.evaluate(expression);
-        let value = match value_result {
-            Ok(v) => v,
-            Err(e) => return Err(e),
-        };
+        let value = self.evaluate(expression)?;
         match operator {
             UnaryOperator::Bang => {
                 if value == Value::Nil || value == Value::Boolean(false) {

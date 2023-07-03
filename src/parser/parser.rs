@@ -486,7 +486,41 @@ impl Parser {
                 Err(e) => return Err(e),
             }
         }
-        self.parse_primary()
+        self.parse_call()
+    }
+
+    fn parse_call(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.parse_primary()?;
+        loop {
+            if self.matches(&[TokenType::LeftParen]) {
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParserError> {
+        let mut arguments = vec![];
+        if !self.check(&TokenType::RightParen) {
+            while self.matches(&[TokenType::Comma]) {
+                arguments.push(self.parse_expression()?);
+            }
+            arguments.push(self.parse_expression()?);
+        }
+        if arguments.len() > 255 {
+            return Err(Self::error(
+                self.peek(),
+                "Can't have more than 255 arguments.",
+            ));
+        }
+        let paren = self.consume(TokenType::RightParen, "Expect ')' after arguments.")?;
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            paren: paren.clone(),
+            arguments,
+        })
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParserError> {
@@ -501,10 +535,7 @@ impl Parser {
                 let result_expr = self.parse_expression();
                 match result_expr {
                     Ok(expr) => {
-                        match self.consume(TokenType::RightParen, "Expect ')' after expression.") {
-                            Ok(_) => {}
-                            Err(err) => return Err(err),
-                        };
+                        self.consume(TokenType::RightParen, "Expect ')' after expression.")?;
                         Expr::Grouping(Box::new(expr))
                     }
                     e => return e,
