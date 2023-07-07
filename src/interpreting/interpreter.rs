@@ -1,8 +1,10 @@
-use crate::parser::{BinaryOperator, Expr, LogicalOperator, Stmt, UnaryOperator};
-use crate::scanner::Token;
+use crate::parsing::{BinaryOperator, Expr, LogicalOperator, Stmt, UnaryOperator};
+use crate::scanning::Token;
 use std::cmp::PartialEq;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::error::Error;
+use std::fmt::{Debug, Display};
 use std::string::ToString;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,6 +12,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct RuntimeError {
     pub message: String,
 }
+
+impl Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("Runtime error: {}", self.message))
+    }
+}
+
+impl Error for RuntimeError {}
 
 #[derive(Clone, Debug, PartialEq)]
 enum ValueType {
@@ -40,16 +50,13 @@ impl Value {
             Value::Boolean(_) => ValueType::Boolean,
             Value::Nil => ValueType::Nil,
             Value::Callable { f: _, num_args } => ValueType::Callable {
-                num_args: num_args.clone(),
+                num_args: *num_args,
             },
         }
     }
 
     fn is_truthy(&self) -> bool {
-        match self {
-            Self::Nil | Self::Boolean(false) => false,
-            _ => true,
-        }
+        !matches!(self, Self::Nil | Self::Boolean(false))
     }
 }
 
@@ -92,7 +99,7 @@ impl ToString for Value {
             Value::String(x) => x.to_string(),
             Value::Boolean(x) => x.to_string(),
             Value::Nil => "nil".to_string(),
-            Value::Callable { f: _, num_args } => format!("Function {:?} args", num_args),
+            Value::Callable { f: _, num_args } => format!("Function {num_args} args"),
         }
     }
 }
@@ -120,7 +127,7 @@ pub struct Environment {
     values: HashMap<String, Value>,
 }
 
-impl<'a> Environment {
+impl Environment {
     pub fn new() -> Self {
         Environment {
             enclosing_environment: None,
@@ -136,18 +143,18 @@ impl<'a> Environment {
     }
 
     fn define(&mut self, name: String, value: Value) {
-        self.values.insert(name.clone(), value.clone());
+        self.values.insert(name, value);
     }
 
     fn assign(&mut self, name: String, value: Value) -> Result<(), RuntimeError> {
-        if self.values.contains_key(&name) {
-            self.values.insert(name, value);
+        if let Entry::Occupied(mut e) = self.values.entry(name.clone()) {
+            e.insert(value);
             Ok(())
         } else {
             match &mut self.enclosing_environment {
                 Some(environment) => environment.assign(name, value),
                 None => Err(RuntimeError {
-                    message: format!("Undefined variable '{}'.", name),
+                    message: format!("Undefined variable '{name}'."),
                 }),
             }
         }
@@ -159,10 +166,16 @@ impl<'a> Environment {
             None => match &self.enclosing_environment {
                 Some(environment) => environment.get(name),
                 None => Err(RuntimeError {
-                    message: format!("Undefined variable '{}'.", { name }),
+                    message: format!("Undefined variable '{name}'."),
                 }),
             },
         }
+    }
+}
+
+impl Default for Environment {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -228,7 +241,7 @@ impl Interpreter {
                 match interpret_with_optional_environment(statements, Some(self.environment)) {
                     Ok(optional_environment) => Ok(Interpreter::new(optional_environment)),
                     // TODO: Figure out how to get a prompt environment to have a block statement throw a runtime error and not reset the state.
-                    Err(err) => return Err((Interpreter::new(None), err)),
+                    Err(err) => Err((Interpreter::new(None), err)),
                 }
             }
             Stmt::If {
@@ -241,29 +254,26 @@ impl Interpreter {
                     Ok(value) => value,
                     Err(err) => return Err((self, err)),
                 };
-                let interpreter = match condition_value.is_truthy() {
-                    true => {
-                        match interpret_with_optional_environment(
-                            vec![*then_stmt],
+                let interpreter = if condition_value.is_truthy() {
+                    match interpret_with_optional_environment(
+                        vec![*then_stmt],
+                        Some(self.environment),
+                    ) {
+                        Ok(optional_environment) => Interpreter::new(optional_environment),
+                        // TODO: Figure out how to get a prompt environment to have a block statement throw a runtime error and not reset the state.
+                        Err(err) => return Err((Interpreter::new(None), err)),
+                    }
+                } else {
+                    match else_stmt {
+                        Some(stmt) => match interpret_with_optional_environment(
+                            vec![*stmt],
                             Some(self.environment),
                         ) {
                             Ok(optional_environment) => Interpreter::new(optional_environment),
                             // TODO: Figure out how to get a prompt environment to have a block statement throw a runtime error and not reset the state.
                             Err(err) => return Err((Interpreter::new(None), err)),
-                        }
-                    }
-                    false => {
-                        match else_stmt {
-                            Some(stmt) => match interpret_with_optional_environment(
-                                vec![*stmt],
-                                Some(self.environment),
-                            ) {
-                                Ok(optional_environment) => Interpreter::new(optional_environment),
-                                // TODO: Figure out how to get a prompt environment to have a block statement throw a runtime error and not reset the state.
-                                Err(err) => return Err((Interpreter::new(None), err)),
-                            },
-                            None => self,
-                        }
+                        },
+                        None => self,
                     }
                 };
 
@@ -282,7 +292,7 @@ impl Interpreter {
                 let value_result = self.evaluate(expr);
                 match value_result {
                     Ok(_) => Ok(self),
-                    Err(err) => return Err((self, err)),
+                    Err(err) => Err((self, err)),
                 }
             }
             Stmt::Var { name, initializer } => {
@@ -432,7 +442,7 @@ impl Interpreter {
             },
             BinaryOperator::Plus => match (left_value, right_value) {
                 (Value::Number(l), Value::Number(r)) => Ok(Value::Number(l + r)),
-                (Value::String(l), Value::String(r)) => Ok(Value::String(format!("{}{}", l, r))),
+                (Value::String(l), Value::String(r)) => Ok(Value::String(format!("{l}{r}"))),
                 (lv, rv) => Err(RuntimeError {
                     message: format!("Cannot add {:?} and {:?}", lv.get_type(), rv.get_type()),
                 }),
@@ -478,24 +488,18 @@ impl Interpreter {
             args.push(self.evaluate(arg_expr)?);
         }
 
-        let (callee, num_args) = match callee_value {
-            Value::Callable { f, num_args } => (f, num_args),
-            _ => {
-                return Err(RuntimeError {
-                    message: format!("Can only call functions and classes at {:?}", paren),
-                })
-            }
-        };
+        let Value::Callable { f, num_args } = callee_value else {
+                             return Err(RuntimeError {
+                                 message: format!("Can only call functions and classes at {paren:?}"),
+                            })
+                       };
         let arg_length = args.len();
         if arg_length != num_args {
             return Err(RuntimeError {
-                message: format!(
-                    "Expected {} arguments, but received {}.",
-                    num_args, arg_length
-                ),
+                message: format!("Expected {num_args} arguments, but received {arg_length}."),
             });
         }
-        Ok(callee(self, args))
+        Ok(f(self, args))
     }
 
     fn evaluate_logical_operator_expression(
@@ -507,10 +511,10 @@ impl Interpreter {
         let left_value = self.evaluate(left_expression)?;
         match operator {
             LogicalOperator::And => {
-                if !left_value.is_truthy() {
-                    Ok(Value::Boolean(false))
-                } else {
+                if left_value.is_truthy() {
                     self.evaluate(right_expression)
+                } else {
+                    Ok(Value::Boolean(false))
                 }
             }
             LogicalOperator::Or => {

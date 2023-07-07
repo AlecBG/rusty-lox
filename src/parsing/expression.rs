@@ -1,7 +1,7 @@
-use crate::scanner::{Token, TokenType};
+use crate::scanning::{Token, TokenType};
 use std::convert::TryFrom;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum BinaryOperator {
     BangEqual,
     EqualEqual,
@@ -35,7 +35,7 @@ impl TryFrom<TokenType> for BinaryOperator {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum LogicalOperator {
     And,
     Or,
@@ -53,7 +53,7 @@ impl TryFrom<TokenType> for LogicalOperator {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum UnaryOperator {
     Minus,
     Bang,

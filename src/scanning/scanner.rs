@@ -1,10 +1,26 @@
 use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::Display;
 
 use super::token::Token;
 
 use super::token_type::TokenType;
 
-pub fn scan_tokens(source: String) -> Result<Vec<Token>, SyntaxError> {
+#[derive(Debug)]
+pub struct SyntaxError {
+    pub message: String,
+    pub line: usize,
+}
+
+impl Display for SyntaxError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("Syntax error: {} at {}", self.message, self.line))
+    }
+}
+
+impl Error for SyntaxError {}
+
+pub fn scan_tokens(source: &str) -> Result<Vec<Token>, SyntaxError> {
     let mut scanner = Scanner::new(source);
     scanner.scan_tokens()
 }
@@ -19,7 +35,7 @@ struct Scanner {
 }
 
 impl Scanner {
-    fn new(source: String) -> Scanner {
+    fn new(source: &str) -> Scanner {
         let source_chars: Vec<char> = source.chars().collect();
         let keywords: HashMap<String, TokenType> = HashMap::from([
             ("and".to_string(), TokenType::And),
@@ -77,30 +93,30 @@ impl Scanner {
 
             '!' => {
                 if self.is_current_char('=') {
-                    self.add_token(TokenType::BangEqual)
+                    self.add_token(TokenType::BangEqual);
                 } else {
-                    self.add_token(TokenType::Bang)
+                    self.add_token(TokenType::Bang);
                 }
             }
             '=' => {
                 if self.is_current_char('=') {
-                    self.add_token(TokenType::EqualEqual)
+                    self.add_token(TokenType::EqualEqual);
                 } else {
-                    self.add_token(TokenType::Equal)
+                    self.add_token(TokenType::Equal);
                 }
             }
             '<' => {
                 if self.is_current_char('=') {
-                    self.add_token(TokenType::LessEqual)
+                    self.add_token(TokenType::LessEqual);
                 } else {
-                    self.add_token(TokenType::Less)
+                    self.add_token(TokenType::Less);
                 }
             }
             '>' => {
                 if self.is_current_char('=') {
-                    self.add_token(TokenType::GreaterEqual)
+                    self.add_token(TokenType::GreaterEqual);
                 } else {
-                    self.add_token(TokenType::Greater)
+                    self.add_token(TokenType::Greater);
                 }
             }
 
@@ -110,7 +126,7 @@ impl Scanner {
                         self.advance();
                     }
                 } else {
-                    self.add_token(TokenType::Slash)
+                    self.add_token(TokenType::Slash);
                 }
             }
 
@@ -134,7 +150,7 @@ impl Scanner {
                     line: self.line,
                 });
             }
-        }
+        };
         Ok(())
     }
 
@@ -148,13 +164,13 @@ impl Scanner {
         self.tokens.push(Token {
             token_type,
             line: self.line,
-        })
+        });
     }
 
     fn add_string_token(&mut self) -> Result<(), SyntaxError> {
         while self.peek() != '"' && !self.is_at_end() {
             if self.peek() == '\n' {
-                self.line += 1
+                self.line += 1;
             }
             self.advance();
         }
@@ -167,7 +183,7 @@ impl Scanner {
         }
         self.advance(); // The closing '"'
         let string_value: String = self.source_chars[self.start + 1..self.current - 1]
-            .into_iter()
+            .iter()
             .collect();
         self.add_token(TokenType::String(string_value));
         Ok(())
@@ -187,20 +203,16 @@ impl Scanner {
             }
         }
 
-        let number_string: String = self.source_chars[self.start..self.current]
-            .into_iter()
-            .collect();
+        let number_string: String = self.source_chars[self.start..self.current].iter().collect();
         let number: f64 = number_string.parse::<f64>().unwrap();
-        self.add_token(TokenType::Number(number))
+        self.add_token(TokenType::Number(number));
     }
 
     fn add_identifier_token(&mut self) {
         while is_alphanumeric(self.peek()) {
             self.advance();
         }
-        let text: String = self.source_chars[self.start..self.current]
-            .into_iter()
-            .collect();
+        let text: String = self.source_chars[self.start..self.current].iter().collect();
         let possible_keyword_token = self.keywords.get(&text);
         match possible_keyword_token {
             Some(keyword) => self.add_token(keyword.clone()),
@@ -218,7 +230,7 @@ impl Scanner {
             return false;
         }
         self.current += 1;
-        return true;
+        true
     }
 
     fn peek(&self) -> char {
@@ -241,21 +253,15 @@ impl Scanner {
 }
 
 fn is_digit(c: char) -> bool {
-    c >= '0' && c <= '9'
+    c.is_ascii_digit()
 }
 
 fn is_alpha(c: char) -> bool {
-    (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+    c.is_ascii_lowercase() || c.is_ascii_uppercase() || c == '_'
 }
 
 fn is_alphanumeric(c: char) -> bool {
     is_digit(c) || is_alpha(c)
-}
-
-#[derive(Debug)]
-pub struct SyntaxError {
-    pub message: String,
-    pub line: usize,
 }
 
 fn error(line: usize, message: &str) {

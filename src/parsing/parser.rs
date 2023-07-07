@@ -1,7 +1,9 @@
 use std::convert::TryFrom;
+use std::error::Error;
+use std::fmt::Display;
 
-use crate::scanner::Token;
-use crate::scanner::TokenType;
+use crate::scanning::Token;
+use crate::scanning::TokenType;
 
 use super::expression::{BinaryOperator, Expr, UnaryOperator};
 use super::statement::Stmt;
@@ -13,16 +15,61 @@ pub struct ParserError {
     pub message: String,
 }
 
+impl Display for ParserError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!(
+            "Parser error: {} at token {}",
+            self.message, self.token
+        ))
+    }
+}
+
+impl Error for ParserError {}
+
 #[derive(Debug)]
 pub struct ParserErrorLine {
     pub line: usize,
-    pub error: ParserError,
+    pub token: Token,
+    pub message: String,
 }
+
+impl ParserErrorLine {
+    fn from_parser_error(error: ParserError, line: usize) -> Self {
+        Self {
+            line,
+            token: error.token,
+            message: error.message,
+        }
+    }
+}
+
+impl Display for ParserErrorLine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!(
+            "Parser error: {} at token {} at line {}",
+            self.message, self.token, self.line
+        ))
+    }
+}
+
+impl Error for ParserErrorLine {}
 
 #[derive(Debug)]
 pub struct ParserErrors {
     pub errors: Vec<ParserErrorLine>,
 }
+
+impl Display for ParserErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Parser errors:")?;
+        for error in &self.errors {
+            f.write_str(&format!("\n    {error}"))?;
+        }
+        Ok(())
+    }
+}
+
+impl Error for ParserErrors {}
 
 pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, ParserErrors> {
     let mut parser = Parser::new(tokens);
@@ -46,7 +93,9 @@ impl Parser {
         while !self.is_at_end() {
             match self.parse_declaration() {
                 Ok(stmt) => statements.push(stmt),
-                Err(error) => parser_errors_line.push(ParserErrorLine { line, error }),
+                Err(error) => {
+                    parser_errors_line.push(ParserErrorLine::from_parser_error(error, line));
+                }
             }
             line += 1;
         }
@@ -94,10 +143,7 @@ impl Parser {
                     Ok(_) => {}
                     Err(err) => return Err(err),
                 };
-                Ok(Stmt::Var {
-                    name: name.to_string(),
-                    initializer,
-                })
+                Ok(Stmt::Var { name, initializer })
             }
             _ => Err(Parser::error(self.peek(), "Expect variable name.")),
         }
@@ -140,30 +186,28 @@ impl Parser {
             Some(stmt)
         };
 
-        let condition = match self.matches(&[TokenType::Semicolon]) {
-            false => {
-                let expr = match self.parse_expression() {
-                    Ok(expr) => expr,
-                    Err(err) => return Err(err),
-                };
-                Some(expr)
-            }
-            true => None,
+        let condition = if self.matches(&[TokenType::Semicolon]) {
+            None
+        } else {
+            let expr = match self.parse_expression() {
+                Ok(expr) => expr,
+                Err(err) => return Err(err),
+            };
+            Some(expr)
         };
         match self.consume(TokenType::Semicolon, "Expect ';' after loop condition.") {
             Ok(_) => {}
             Err(err) => return Err(err),
         };
 
-        let increment = match self.matches(&[TokenType::RightParen]) {
-            false => {
-                let expr = match self.parse_expression() {
-                    Ok(expr) => expr,
-                    Err(err) => return Err(err),
-                };
-                Some(expr)
-            }
-            true => None,
+        let increment = if self.matches(&[TokenType::RightParen]) {
+            None
+        } else {
+            let expr = match self.parse_expression() {
+                Ok(expr) => expr,
+                Err(err) => return Err(err),
+            };
+            Some(expr)
         };
         match self.consume(TokenType::RightParen, "Expect ')' after for clauses") {
             Ok(_) => {}
@@ -213,12 +257,13 @@ impl Parser {
             Ok(stmt) => Box::new(stmt),
             Err(err) => return Err(err),
         };
-        let else_stmt = match self.matches(&[TokenType::Else]) {
-            true => match self.parse_statement() {
+        let else_stmt = if self.matches(&[TokenType::Else]) {
+            match self.parse_statement() {
                 Ok(stmt) => Some(Box::new(stmt)),
                 Err(err) => return Err(err),
-            },
-            false => None,
+            }
+        } else {
+            None
         };
         Ok(Stmt::If {
             condition,
@@ -545,7 +590,7 @@ impl Parser {
             unexpected_type => {
                 return Err(Parser::error(
                     self.peek(),
-                    &format!("Expect expression, found type {:?}.", unexpected_type),
+                    &format!("Expect expression, found type {unexpected_type:?}."),
                 ));
             }
         };
@@ -590,13 +635,13 @@ impl Parser {
 
     fn error(token: &Token, message: &str) -> ParserError {
         let line_number = token.clone().line;
-        let return_message = match token.token_type.clone() {
-            TokenType::EOF => format!("{}, at end {}", line_number, message),
-            t => format!("{:?}, at '{:?}' {}", t, line_number, message),
+        let message = match token.token_type.clone() {
+            TokenType::EOF => format!("{line_number}, at end {message}"),
+            t => format!("{t:?}, at '{line_number}' {message}"),
         };
         ParserError {
             token: token.clone(),
-            message: return_message.to_string(),
+            message,
         }
     }
 
