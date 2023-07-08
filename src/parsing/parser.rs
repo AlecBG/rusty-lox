@@ -18,8 +18,8 @@ pub struct ParserError {
 impl Display for ParserError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!(
-            "Parser error: {} at token {}",
-            self.message, self.token
+            "Parser error: {} at token {} on line {}",
+            self.message, self.token, self.token.line
         ))
     }
 }
@@ -27,36 +27,8 @@ impl Display for ParserError {
 impl Error for ParserError {}
 
 #[derive(Debug)]
-pub struct ParserErrorLine {
-    pub line: usize,
-    pub token: Token,
-    pub message: String,
-}
-
-impl ParserErrorLine {
-    fn from_parser_error(error: ParserError, line: usize) -> Self {
-        Self {
-            line,
-            token: error.token,
-            message: error.message,
-        }
-    }
-}
-
-impl Display for ParserErrorLine {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&format!(
-            "Parser error: {} at token {} at line {}",
-            self.message, self.token, self.line
-        ))
-    }
-}
-
-impl Error for ParserErrorLine {}
-
-#[derive(Debug)]
 pub struct ParserErrors {
-    pub errors: Vec<ParserErrorLine>,
+    pub errors: Vec<ParserError>,
 }
 
 impl Display for ParserErrors {
@@ -88,16 +60,14 @@ impl Parser {
 
     fn parse(&mut self) -> Result<Vec<Stmt>, ParserErrors> {
         let mut statements: Vec<Stmt> = vec![];
-        let mut parser_errors_line: Vec<ParserErrorLine> = vec![];
-        let mut line = 1;
+        let mut parser_errors_line: Vec<ParserError> = vec![];
         while !self.is_at_end() {
             match self.parse_declaration() {
                 Ok(stmt) => statements.push(stmt),
                 Err(error) => {
-                    parser_errors_line.push(ParserErrorLine::from_parser_error(error, line));
+                    parser_errors_line.push(error);
                 }
             }
-            line += 1;
         }
         if parser_errors_line.is_empty() {
             Ok(statements)
