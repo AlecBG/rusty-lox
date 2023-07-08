@@ -1,0 +1,13 @@
+fun outer() {
+    var x = 0;
+    fun inner() {
+        x = x + 1;
+        print x;
+    }
+    return inner;
+}
+
+var counter = outer();
+counter();
+counter();
+counter();

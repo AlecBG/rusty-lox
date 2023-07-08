@@ -93,12 +93,11 @@ pub fn run_prompt() {
                 continue;
             }
         };
-        let result = interpret_with_environment(statements, prompt_environment);
-        prompt_environment = match result {
-            Ok(environment) => environment,
-            Err((env, err)) => {
+        let result = interpret_with_environment(statements, &mut prompt_environment);
+        match result {
+            Ok(_) => {}
+            Err(err) => {
                 eprintln!("Error: {err:?}");
-                env
             }
         };
     }

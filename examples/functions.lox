@@ -1,0 +1,35 @@
+var a = 1;
+
+fun f() {
+    print a;
+}
+
+print clock();
+f();
+a = 4;
+f();
+
+fun sayHi(first, last) {
+    print "Hi, " + first + " "  + last + "!";
+}
+
+sayHi("Mr", "ReadingThisFile");
+
+
+fun h() {
+    return 1;
+}
+
+print h();
+
+print "recursive functions";
+fun g(c) {
+    print "Called with";
+    print c;
+    if (c <= 0) {
+        print "done";
+        return 0;
+    }
+    g(c - 1);
+}
+g(5);
