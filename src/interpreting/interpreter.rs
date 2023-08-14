@@ -1,349 +1,72 @@
 use crate::parsing::{
-    BinaryOperator, Expr, FunctionStatement, IfStatement, LogicalOperator, Stmt, UnaryOperator,
-    VariableDeclaration, WhileStatement,
+    BinaryOperator, Expr, IfStatement, LogicalOperator, ResolvableExpr, SaveExpression, Stmt,
+    UnaryOperator, VariableDeclaration, WhileStatement,
 };
 use crate::scanning::Token;
 use std::cell::RefCell;
-use std::cmp::PartialEq;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::{Debug, Display};
 use std::rc::Rc;
-use std::string::ToString;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct RuntimeError {
-    pub message: String,
+use super::environment::Environment;
+use super::functions::{LoxCallable, LoxFunction};
+use super::runtime_errors::{RuntimeError, RuntimeErrorOrReturnValue};
+use super::values::Value;
+
+pub struct Interpreter {
+    environment: Box<dyn Environment>,
+    locals: HashMap<ResolvableExpr, usize>,
+    with_resolver: bool,
 }
 
-impl Display for RuntimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&format!("Runtime error: {}", self.message))
-    }
-}
-
-impl Error for RuntimeError {}
-
-#[derive(Clone, Debug, PartialEq)]
-enum RuntimeErrorOrReturnValue {
-    RuntimeError(RuntimeError),
-    ReturnValue(Value),
-}
-
-impl From<RuntimeError> for RuntimeErrorOrReturnValue {
-    fn from(error: RuntimeError) -> Self {
-        Self::RuntimeError(error)
-    }
-}
-
-trait LoxCallable {
-    fn call(&mut self, arguments: Vec<Value>) -> Result<Value, RuntimeErrorOrReturnValue>;
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum NativeFunction {
-    Clock,
-}
-
-impl NativeFunction {
-    fn get_type(&self) -> ValueType {
-        match self {
-            Self::Clock => ValueType::Function { num_args: 0 },
-        }
-    }
-}
-
-impl Display for NativeFunction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Clock => f.write_str("Native function: clock"),
-        }
-    }
-}
-
-impl LoxCallable for NativeFunction {
-    fn call(&mut self, arguments: Vec<Value>) -> Result<Value, RuntimeErrorOrReturnValue> {
-        match self {
-            Self::Clock => {
-                if !arguments.is_empty() {
-                    return Err(RuntimeError {
-                        message: "clock expects zero arguments".to_string(),
-                    }
-                    .into());
-                }
-                Ok(Value::Number(
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs_f64(),
-                ))
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct LoxFunction {
-    function: FunctionStatement,
-    environment: Environment,
-}
-
-impl LoxCallable for LoxFunction {
-    fn call(&mut self, arguments: Vec<Value>) -> Result<Value, RuntimeErrorOrReturnValue> {
-        if arguments.len() != self.function.params.len() {
-            return Err(RuntimeError {
-                message: format!(
-                    "{} expects {} arguments and received {}",
-                    self.function.name,
-                    self.function.params.len(),
-                    arguments.len()
-                ),
-            }
-            .into());
-        }
-        self.environment.push();
-        self.environment
-            .define(self.function.name.clone(), Value::Function(self.clone()));
-        for (arg, param) in arguments.into_iter().zip(self.function.params.iter()) {
-            self.environment.define(param.clone(), arg);
-        }
-        let mut interpreter: Interpreter = Interpreter::new(&mut self.environment);
-
-        for stmt in &self.function.body {
-            match interpreter.execute(stmt.clone()) {
-                Ok(_) => {}
-                Err(err) => match err {
-                    RuntimeErrorOrReturnValue::RuntimeError(e) => {
-                        self.environment.pop();
-                        return Err(RuntimeErrorOrReturnValue::RuntimeError(e));
-                    }
-                    RuntimeErrorOrReturnValue::ReturnValue(v) => {
-                        self.environment.pop();
-                        return Ok(v);
-                    }
-                },
-            };
-        }
-        self.environment.pop();
-        Ok(Value::Nil)
-    }
-}
-
-impl Display for LoxFunction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("LoxFunction")
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum ValueType {
-    Number,
-    String,
-    Boolean,
-    Nil,
-    Function { num_args: usize },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-enum Value {
-    Number(f64),
-    String(String),
-    Boolean(bool),
-    Nil,
-    Function(LoxFunction),
-    NativeFunction(NativeFunction),
-}
-
-impl Value {
-    fn get_type(&self) -> ValueType {
-        match self {
-            Value::Number(_) => ValueType::Number,
-            Value::String(_) => ValueType::String,
-            Value::Boolean(_) => ValueType::Boolean,
-            Value::Nil => ValueType::Nil,
-            Value::Function(f) => ValueType::Function {
-                num_args: f.function.params.len(),
-            },
-            Value::NativeFunction(f) => f.get_type(),
-        }
-    }
-
-    fn is_truthy(&self) -> bool {
-        !matches!(self, Self::Nil | Self::Boolean(false))
-    }
-}
-
-impl Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Value::Number(x) => {
-                let x_s = x.to_string();
-                if x_s.ends_with(".0") {
-                    f.write_str(x_s[..x_s.len() - 2].into())
-                } else {
-                    f.write_str(&x_s)
-                }
-            }
-            Value::String(x) => f.write_str(x),
-            Value::Boolean(x) => f.write_str(&format!("{x:?}")),
-            Value::Nil => f.write_str("nil"),
-            Value::Function(LoxFunction {
-                function,
-                environment: _,
-            }) => f.write_str(&format!("{function:?}")),
-            Value::NativeFunction(func) => f.write_str(&format!("{func}")),
-        }
-    }
-}
-
-fn construct_global_values() -> HashMap<String, Rc<RefCell<Value>>> {
-    let clock = Value::NativeFunction(NativeFunction::Clock);
-    HashMap::from([("clock".to_string(), Rc::new(RefCell::new(clock)))])
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Environment {
-    values: Vec<HashMap<String, Rc<RefCell<Value>>>>,
-    pos: usize,
-}
-
-impl Environment {
-    pub fn new() -> Self {
-        Self {
-            values: vec![construct_global_values()],
-            pos: 0,
-        }
-    }
-
-    fn push(&mut self) {
-        self.values.push(HashMap::new());
-        self.pos += 1;
-    }
-
-    fn pop(&mut self) -> Option<&mut Self> {
-        self.pos = self.values.len() - 1;
-        if self.pos == 0 {
-            return None;
-        }
-        self.values.pop();
-        self.pos -= 1;
-        Some(self)
-    }
-
-    fn define(&mut self, name: String, value: Value) {
-        self.values[self.pos].insert(name, Rc::new(RefCell::new(value)));
-    }
-
-    fn assign(&mut self, name: String, value: Value) -> Result<(), RuntimeErrorOrReturnValue> {
-        let pos = self.pos;
-        if let Entry::Occupied(mut e) = self.values[self.pos].entry(name.clone()) {
-            e.insert(Rc::new(RefCell::new(value)));
-            Ok(())
-        } else {
-            if self.pos == 0 {
-                return Err(RuntimeError {
-                    message: format!("Undefined variable '{name}'."),
-                }
-                .into());
-            }
-            self.pos -= 1;
-            self.assign(name, value)?;
-            self.pos = pos;
-            Ok(())
-        }
-    }
-
-    fn get(&self, name: &str) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
-        for values in self.values.iter().rev() {
-            if let Some(v) = values.get(name) {
-                return Ok(v.clone());
-            }
-        }
-        Err(RuntimeError {
-            message: format!("Undefined variable '{name}'."),
-        }
-        .into())
-    }
-}
-
-impl Default for Environment {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub fn interpret(statements: Vec<Stmt>) -> Result<(), RuntimeError> {
-    match interpret_with_optional_environment(statements, None) {
-        Ok(_) => Ok(()),
-        Err(err) => match err {
-            RuntimeErrorOrReturnValue::RuntimeError(e) => Err(e),
-            RuntimeErrorOrReturnValue::ReturnValue(_) => Err(RuntimeError {
-                message: "Invalid location for return statement".to_string(),
-            }),
-        },
-    }
-}
-
-pub fn interpret_with_environment(
-    statements: Vec<Stmt>,
-    environment: &mut Environment,
-) -> Result<(), RuntimeError> {
-    let mut interpreter = Interpreter::new(environment);
-    for statement in statements {
-        interpreter.execute(statement).map_err(|err| match err {
-            RuntimeErrorOrReturnValue::RuntimeError(e) => e,
-            RuntimeErrorOrReturnValue::ReturnValue(_) => RuntimeError {
-                message: "Invalid location for return statement".to_string(),
-            },
-        })?;
-    }
-    Ok(())
-}
-
-fn interpret_with_optional_environment(
-    statements: Vec<Stmt>,
-    optional_environment: Option<&mut Environment>,
-) -> Result<(), RuntimeErrorOrReturnValue> {
-    let mut potential_new_environment = Environment::new();
-    let mut interpreter = if let Some(env) = optional_environment {
-        Interpreter::new(env)
-    } else {
-        Interpreter::new(&mut potential_new_environment)
-    };
-    for statement in statements {
-        interpreter.execute(statement)?;
-    }
-    Ok(())
-}
-
-struct Interpreter<'a> {
-    environment: &'a mut Environment,
-}
-
-impl<'a> Interpreter<'a> {
-    pub fn new(environment: &'a mut Environment) -> Self {
+impl Interpreter {
+    pub fn new(mut environment: Box<dyn Environment>) -> Self {
         environment.push();
-        Self { environment }
+        Self {
+            environment,
+            locals: HashMap::new(),
+            with_resolver: true,
+        }
     }
 
-    fn execute(&mut self, statement: Stmt) -> Result<(), RuntimeErrorOrReturnValue> {
+    pub fn new_without_resolver(mut environment: Box<dyn Environment>) -> Self {
+        environment.push();
+        Self {
+            environment,
+            locals: HashMap::new(),
+            with_resolver: false,
+        }
+    }
+
+    pub fn resolve(&mut self, expr: ResolvableExpr, depth: usize) {
+        self.locals.insert(expr, depth);
+    }
+
+    pub fn execute_statements(&mut self, stmts: Vec<Stmt>) -> Result<(), RuntimeError> {
+        for stmt in stmts {
+            if let Err(RuntimeErrorOrReturnValue::RuntimeError(err)) = self.execute(stmt) {
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn execute(&mut self, statement: Stmt) -> Result<(), RuntimeErrorOrReturnValue> {
         match statement {
             Stmt::Block(block_statement) => {
+                self.environment.push();
                 for stmt in block_statement.0 {
                     self.execute(stmt)?;
                 }
+                self.environment.pop();
                 Ok(())
             }
             Stmt::Function(function) => {
-                // We give the function a frozen snapshot of the environment at the
-                //  definition time of the function.
                 let mut environment = self.environment.clone();
                 environment.push();
                 let lox_function = LoxFunction {
                     function,
                     environment,
+                    with_resolver: self.with_resolver,
                 };
                 let function_name = lox_function.function.name.clone();
                 self.environment
@@ -405,6 +128,18 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(())
             }
+            Stmt::Test(SaveExpression {
+                value_to_save,
+                values,
+            }) => {
+                let value = match self.evaluate(value_to_save) {
+                    Ok(v) => v.borrow().clone(),
+                    Err(err) => return Err(err),
+                };
+                let mut_vs = &mut *values.borrow_mut();
+                mut_vs.push(value);
+                Ok(())
+            }
         }
     }
 
@@ -442,7 +177,33 @@ impl<'a> Interpreter<'a> {
             Expr::String(x) => Ok(Rc::new(RefCell::new(Value::String(x)))),
             Expr::Boolean(x) => Ok(Rc::new(RefCell::new(Value::Boolean(x)))),
             Expr::Nil => Ok(Rc::new(RefCell::new(Value::Nil))),
-            Expr::Variable(name) => self.environment.get(&name),
+            Expr::Variable(name) => {
+                if self.with_resolver {
+                    let resolvable_expr = ResolvableExpr::Variable(name);
+                    self.lookup_variable(resolvable_expr)
+                } else {
+                    self.environment.get(&name)
+                }
+            }
+        }
+    }
+
+    fn lookup_variable(
+        &mut self,
+        expr: ResolvableExpr,
+    ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
+        if let Some(distance) = self.locals.get(&expr) {
+            match expr {
+                ResolvableExpr::Variable(name) => self.environment.get_at(distance, &name),
+            }
+        } else {
+            match expr {
+                ResolvableExpr::Variable(name) => self.environment.get_at(&0, &name),
+            }
+            // Err(RuntimeError {
+            //     message: format!("Undefined variable '{expr}'."),
+            // }
+            // .into())
         }
     }
 
@@ -691,34 +452,230 @@ impl<'a> Interpreter<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use super::Interpreter;
     use crate::{
-        interpreting::interpreter::Value,
+        interpreting::{
+            environment::{RefCellEnvironment, SingleCopyEnvironment},
+            interpreter::Value,
+            runtime_errors::RuntimeErrorOrReturnValue,
+            RuntimeError,
+        },
         parsing::{
-            BinaryOperator, BlockStatement, Expr, FunctionStatement, ReturnStatement, Stmt,
-            VariableDeclaration,
+            BinaryOperator, BlockStatement, Expr, FunctionStatement, IfStatement, ReturnStatement,
+            SaveExpression, Stmt, VariableDeclaration,
         },
         scanning::{Token, TokenType},
     };
 
-    use super::{Environment, Interpreter};
+    #[test]
+    fn test_variable_declaration() {
+        // var x = 0;
+        // <SAVE VALUE OF x>
+        let saved_values: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(vec![]));
+        let program = Stmt::Block(BlockStatement(vec![
+            Stmt::Var(VariableDeclaration {
+                name: "x".to_string(),
+                initializer: Expr::Number(0.0),
+            }),
+            Stmt::Test(SaveExpression {
+                value_to_save: Expr::Variable("x".to_string()),
+                values: saved_values.clone(),
+            }),
+        ]));
+        let environment = Box::new(RefCellEnvironment::new());
+        let mut interpreter = Interpreter::new_without_resolver(environment);
+        match interpreter.execute(program) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("{e:#?}");
+                panic!("should execute without error")
+            }
+        };
+        assert_eq!(saved_values.borrow().clone(), vec![Value::Number(0.0)]);
+    }
 
-    // This test currently fails because the 'f' retreived from the environment is a clone
-    //  and not a mutable reference.
+    #[test]
+    fn test_function_declaration() {
+        // fun f() {
+        //     return 1.0;
+        // }
+        // var x = f();
+        // <SAVE VALUE OF x>
+        let saved_values: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(vec![]));
+        let program = Stmt::Block(BlockStatement(vec![
+            Stmt::Function(FunctionStatement {
+                name: "f".to_string(),
+                params: vec![],
+                body: vec![Stmt::Return(ReturnStatement {
+                    return_token: Token {
+                        token_type: TokenType::Return,
+                        line: 2,
+                    },
+                    value: Expr::Number(1.0),
+                })],
+            }),
+            Stmt::Var(VariableDeclaration {
+                name: "x".to_string(),
+                initializer: Expr::Call {
+                    callee: Box::new(Expr::Variable("f".to_string())),
+                    paren: Token {
+                        token_type: TokenType::LeftParen,
+                        line: 4,
+                    },
+                    arguments: vec![],
+                },
+            }),
+            Stmt::Test(SaveExpression {
+                value_to_save: Expr::Variable("x".to_string()),
+                values: saved_values.clone(),
+            }),
+        ]));
+        let environment = Box::new(RefCellEnvironment::new());
+        let mut interpreter = Interpreter::new_without_resolver(environment);
+        match interpreter.execute(program) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("{e:#?}");
+                panic!("should execute without error")
+            }
+        };
+        assert_eq!(saved_values.borrow().clone(), vec![Value::Number(1.0)]);
+    }
+
+    #[test]
+    fn test_recursion() {
+        // var numCalls = 0;
+        // fun f(i) {
+        //     numCalls = numCalls + 1;
+        //     if (i <= 0) {
+        //       <SAVE VALUE OF numCalls>
+        //       return;
+        //     }
+        //     f(i - 1);
+        // }
+        // f(3);
+        let saved_values: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(vec![]));
+        let func_def: Stmt = Stmt::Function(FunctionStatement {
+            name: "f".to_string(),
+            params: vec!["i".to_string()],
+            body: vec![
+                // Stmt::Var(VariableDeclaration {
+                //     name: "numCalls".to_string(),
+                //     initializer: Expr::Number(0.0),
+                // }),
+                Stmt::Expression(Expr::Assign {
+                    name: "numCalls".to_string(),
+                    expression: Box::new(Expr::Binary {
+                        left: Box::new(Expr::Variable("numCalls".to_string())),
+                        operator: BinaryOperator::Plus,
+                        right: Box::new(Expr::Number(1.0)),
+                    }),
+                }),
+                Stmt::If(IfStatement {
+                    condition: Expr::Binary {
+                        left: Box::new(Expr::Variable("i".to_string())),
+                        operator: BinaryOperator::LessEqual,
+                        right: Box::new(Expr::Number(0.0)),
+                    },
+                    then_stmt: Box::new(Stmt::Block(BlockStatement(vec![
+                        Stmt::Test(SaveExpression {
+                            value_to_save: Expr::Variable("numCalls".to_string()),
+                            values: saved_values.clone(),
+                        }),
+                        Stmt::Return(ReturnStatement {
+                            return_token: Token {
+                                token_type: TokenType::Return,
+                                line: 3,
+                            },
+                            value: Expr::Nil,
+                        }),
+                    ]))),
+                    else_stmt: None,
+                }),
+                Stmt::Expression(Expr::Call {
+                    callee: Box::new(Expr::Variable("f".to_string())),
+                    paren: Token {
+                        token_type: TokenType::LeftParen,
+                        line: 4,
+                    },
+                    arguments: vec![Expr::Binary {
+                        left: Box::new(Expr::Variable("i".to_string())),
+                        operator: BinaryOperator::Minus,
+                        right: Box::new(Expr::Number(1.0)),
+                    }],
+                }),
+            ],
+        });
+        let program = Stmt::Block(BlockStatement(vec![
+            Stmt::Var(VariableDeclaration {
+                name: "numCalls".to_string(),
+                initializer: Expr::Number(0.0),
+            }),
+            func_def,
+            Stmt::Expression(Expr::Call {
+                callee: Box::new(Expr::Variable("f".to_string())),
+                paren: Token {
+                    token_type: TokenType::LeftParen,
+                    line: 6,
+                },
+                arguments: vec![Expr::Number(3.0)],
+            }),
+        ]));
+        let environment = Box::new(RefCellEnvironment::new());
+        let mut interpreter = Interpreter::new_without_resolver(environment);
+        match interpreter.execute(program) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("{e:#?}");
+                panic!("should execute without error")
+            }
+        };
+        assert_eq!(saved_values.borrow().clone(), vec![Value::Number(4.0)]);
+    }
+
     #[test]
     fn test_closure() {
+        // fun outer() {
+        //   var x = 0.0;
+        //   fun inner()  {
+        //     x = x + 1;
+        //     <SAVE VALUE OF x>
+        //   }
+        // }
+        // f = outer();
+        // f();
+        // f();
+
+        let saved_values: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(vec![]));
+        // fun inner() {
+        //      x = x + 1;
+        //      <SAVE VALUE OF x>
+        // }
         let inner_func_stmt = Stmt::Function(FunctionStatement {
             name: "inner".to_string(),
             params: vec![],
-            body: vec![Stmt::Expression(Expr::Assign {
-                name: "x".to_string(),
-                expression: Box::new(Expr::Binary {
-                    left: Box::new(Expr::Variable("x".to_string())),
-                    operator: BinaryOperator::Plus,
-                    right: Box::new(Expr::Number(1.0)),
+            body: vec![
+                Stmt::Expression(Expr::Assign {
+                    name: "x".to_string(),
+                    expression: Box::new(Expr::Binary {
+                        left: Box::new(Expr::Variable("x".to_string())),
+                        operator: BinaryOperator::Plus,
+                        right: Box::new(Expr::Number(1.0)),
+                    }),
                 }),
-            })],
+                Stmt::Test(SaveExpression {
+                    value_to_save: Expr::Variable("x".to_string()),
+                    values: saved_values.clone(),
+                }),
+            ],
         });
 
+        // fun outer() {
+        //     var x = 0.0;
+        //     <definition of inner>
+        // }
         let outer_function_stmt = Stmt::Function(FunctionStatement {
             name: "outer".to_string(),
             params: vec![],
@@ -738,6 +695,10 @@ mod tests {
             ],
         });
 
+        // <definition of outer>
+        // f = outer();
+        // f();
+        // f();
         let program = Stmt::Block(BlockStatement(vec![
             outer_function_stmt,
             Stmt::Var(VariableDeclaration {
@@ -759,30 +720,113 @@ mod tests {
                 },
                 arguments: vec![],
             }),
+            Stmt::Expression(Expr::Call {
+                callee: Box::new(Expr::Variable("f".to_string())),
+                paren: Token {
+                    token_type: TokenType::LeftParen,
+                    line: 5,
+                },
+                arguments: vec![],
+            }),
         ]));
-        let environment = &mut Environment::new();
-        let mut interpreter = Interpreter::new(environment);
+        // If we use the refcell environment, then we find that the value of x has been increased by one.
+        let environment = Box::new(RefCellEnvironment::new());
+        let mut interpreter = Interpreter::new_without_resolver(environment);
+        match interpreter.execute(program.clone()) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("{e:#?}");
+                panic!("should execute without error")
+            }
+        };
+        assert_eq!(
+            saved_values.borrow().clone(),
+            vec![Value::Number(1.0), Value::Number(2.0)]
+        );
+        saved_values.borrow_mut().pop();
+        saved_values.borrow_mut().pop();
+
+        // If we use the single copy environment, then we find that the value of x is unchanged by the closure.
+        let environment = Box::new(SingleCopyEnvironment::new());
+        let mut interpreter = Interpreter::new_without_resolver(environment);
         match interpreter.execute(program) {
             Ok(_) => {}
-            Err(_) => panic!("should execute without error"),
+            Err(e) => {
+                println!("{e:#?}");
+                panic!("should execute without error")
+            }
         };
-        let f_func = match environment.get("f") {
-            Ok(f) => f,
-            Err(_) => panic!("'f' should be defined"),
-        };
-        let binding = f_func.borrow();
-        let lox_func = match &*binding {
-            Value::Function(f) => f,
-            _ => panic!("'f' should be a function"),
-        };
-
         assert_eq!(
-            lox_func
-                .environment
-                .get("x")
-                .clone()
-                .map(|x| x.borrow().clone()),
-            Ok(Value::Number(1.0))
+            saved_values.borrow().clone(),
+            vec![Value::Number(1.0), Value::Number(1.0)]
         );
+    }
+
+    #[test]
+    fn test_native_clock() {
+        // clock();
+        let program = Stmt::Block(BlockStatement(vec![Stmt::Expression(Expr::Call {
+            callee: Box::new(Expr::Variable("clock".to_string())),
+            paren: Token {
+                token_type: TokenType::LeftParen,
+                line: 5,
+            },
+            arguments: vec![],
+        })]));
+        let environment = Box::new(RefCellEnvironment::new());
+        let mut interpreter = Interpreter::new_without_resolver(environment);
+        match interpreter.execute(program.clone()) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("{e:#?}");
+                panic!("should execute without error")
+            }
+        };
+        let environment = Box::new(SingleCopyEnvironment::new());
+        let mut interpreter = Interpreter::new_without_resolver(environment);
+        match interpreter.execute(program) {
+            Ok(_) => {}
+            Err(e) => {
+                println!("{e:#?}");
+                panic!("should execute without error")
+            }
+        };
+    }
+
+    #[test]
+    fn test_lexically_scoped_environments() {
+        // {
+        //   var a = 1;
+        // }
+        // print a;  // expect exception here
+        let program = Stmt::Block(BlockStatement(vec![
+            Stmt::Block(BlockStatement(vec![Stmt::Var(VariableDeclaration {
+                name: "a".to_string(),
+                initializer: Expr::Number(1.0),
+            })])),
+            Stmt::Print(Expr::Variable("a".to_string())),
+        ]));
+        let environment = Box::new(RefCellEnvironment::new());
+        let mut interpreter = Interpreter::new_without_resolver(environment);
+        match interpreter.execute(program.clone()) {
+            Ok(_) => panic!("Should throw runtime exception"),
+            Err(e) => match e {
+                RuntimeErrorOrReturnValue::RuntimeError(x) => {
+                    assert!(x.message.contains("Undefined variable 'a'"))
+                }
+                _ => panic!("Should throw runtime exception"),
+            },
+        };
+        let environment = Box::new(SingleCopyEnvironment::new());
+        let mut interpreter = Interpreter::new_without_resolver(environment);
+        match interpreter.execute(program.clone()) {
+            Ok(_) => panic!("Should throw runtime exception"),
+            Err(e) => match e {
+                RuntimeErrorOrReturnValue::RuntimeError(x) => {
+                    assert!(x.message.contains("Undefined variable 'a'"))
+                }
+                _ => panic!("Should throw runtime exception"),
+            },
+        };
     }
 }

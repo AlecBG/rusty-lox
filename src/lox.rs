@@ -7,14 +7,16 @@ use std::{
     path::Path,
 };
 
-use crate::interpreting::{interpret, interpret_with_environment, Environment, RuntimeError};
+use crate::interpreting::{Interpreter, RefCellEnvironment, RuntimeError};
 use crate::parsing::{parse, ParserErrors};
+use crate::resolving::{resolve, ResolverError};
 use crate::scanning::{scan_tokens, SyntaxError};
 
 #[derive(Debug)]
 pub enum LoxError {
     ParserErrors(ParserErrors),
     SyntaxError(SyntaxError),
+    ResolverError(ResolverError),
     RuntimeError(RuntimeError),
 }
 
@@ -23,6 +25,7 @@ impl Display for LoxError {
         match self {
             Self::ParserErrors(e) => f.write_str(&format!("{e}")),
             Self::SyntaxError(e) => f.write_str(&format!("{e}")),
+            Self::ResolverError(e) => f.write_str(&format!("{e}")),
             Self::RuntimeError(e) => f.write_str(&format!("{e}")),
         }
     }
@@ -49,12 +52,13 @@ pub fn run_file(path: &Path) {
     match result {
         Ok(()) => {}
         Err(LoxError::ParserErrors(_) | LoxError::SyntaxError(_)) => std::process::exit(65),
+        Err(LoxError::ResolverError(_)) => std::process::exit(65),
         Err(LoxError::RuntimeError(_)) => std::process::exit(70),
     }
 }
 
 pub fn run_prompt() {
-    let mut prompt_environment = Environment::new();
+    let mut interpreter = Interpreter::new(Box::new(RefCellEnvironment::new()));
     loop {
         let mut buffer = String::new();
         print!("> ");
@@ -93,7 +97,7 @@ pub fn run_prompt() {
                 continue;
             }
         };
-        let result = interpret_with_environment(statements, &mut prompt_environment);
+        let result = interpreter.execute_statements(statements);
         match result {
             Ok(_) => {}
             Err(err) => {
@@ -120,7 +124,9 @@ fn run(source: &str) -> Result<(), LoxError> {
         }
     };
 
-    let interpret_result = interpret(statements);
+    let mut interpreter = Interpreter::new(Box::new(RefCellEnvironment::new()));
+    resolve(&mut interpreter, statements.clone()).map_err(LoxError::ResolverError)?;
+    let interpret_result = interpreter.execute_statements(statements);
     match interpret_result {
         Ok(_) => {}
         Err(err) => {

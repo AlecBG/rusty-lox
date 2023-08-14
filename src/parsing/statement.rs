@@ -1,4 +1,6 @@
-use crate::{parsing::expression::Expr, scanning::Token};
+use std::{cell::RefCell, rc::Rc};
+
+use crate::{interpreting::values::Value, parsing::expression::Expr, scanning::Token};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FunctionStatement {
@@ -35,6 +37,13 @@ pub struct ReturnStatement {
     pub value: Expr,
 }
 
+/// Used to capture a value for testing purposes
+#[derive(Clone, Debug, PartialEq)]
+pub struct SaveExpression {
+    pub value_to_save: Expr,
+    pub values: Rc<RefCell<Vec<Value>>>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
     Block(BlockStatement),
@@ -45,4 +54,5 @@ pub enum Stmt {
     If(IfStatement),
     While(WhileStatement),
     Return(ReturnStatement),
+    Test(SaveExpression),
 }
