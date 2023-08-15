@@ -19,11 +19,14 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn new(mut environment: Box<dyn Environment>) -> Self {
+    pub fn new(
+        mut environment: Box<dyn Environment>,
+        locals: HashMap<ResolvableExpr, usize>,
+    ) -> Self {
         environment.push();
         Self {
             environment,
-            locals: HashMap::new(),
+            locals,
             with_resolver: true,
         }
     }
@@ -35,10 +38,6 @@ impl Interpreter {
             locals: HashMap::new(),
             with_resolver: false,
         }
-    }
-
-    pub fn resolve(&mut self, expr: ResolvableExpr, depth: usize) {
-        self.locals.insert(expr, depth);
     }
 
     pub fn execute_statements(&mut self, stmts: Vec<Stmt>) -> Result<(), RuntimeError> {
@@ -194,16 +193,12 @@ impl Interpreter {
     ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
         if let Some(distance) = self.locals.get(&expr) {
             match expr {
-                ResolvableExpr::Variable(name) => self.environment.get_at(distance, &name),
+                ResolvableExpr::Variable(name) => self.environment.get_at(&(distance + 1), &name),
             }
         } else {
             match expr {
                 ResolvableExpr::Variable(name) => self.environment.get_at(&0, &name),
             }
-            // Err(RuntimeError {
-            //     message: format!("Undefined variable '{expr}'."),
-            // }
-            // .into())
         }
     }
 
@@ -460,7 +455,6 @@ mod tests {
             environment::{RefCellEnvironment, SingleCopyEnvironment},
             interpreter::Value,
             runtime_errors::RuntimeErrorOrReturnValue,
-            RuntimeError,
         },
         parsing::{
             BinaryOperator, BlockStatement, Expr, FunctionStatement, IfStatement, ReturnStatement,

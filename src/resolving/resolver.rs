@@ -1,6 +1,5 @@
 use std::{collections::HashMap, error::Error, fmt::Display};
 
-use crate::interpreting::Interpreter;
 use crate::parsing::{Expr, FunctionStatement, ResolvableExpr, Stmt};
 
 #[derive(Debug)]
@@ -24,22 +23,26 @@ impl ResolverError {
 
 type Scopes = Vec<HashMap<String, bool>>;
 
-pub fn resolve(interpreter: &mut Interpreter, statements: Vec<Stmt>) -> Result<(), ResolverError> {
-    let mut resolver = Resolver::new(interpreter);
-    resolver.resolve(statements)
+pub fn resolve(statements: Vec<Stmt>) -> Result<HashMap<ResolvableExpr, usize>, ResolverError> {
+    let mut locals = HashMap::<ResolvableExpr, usize>::new();
+    let mut resolver = Resolver::new(&mut locals);
+    resolver.resolve(statements)?;
+    Ok(locals)
 }
 
 struct Resolver<'a> {
     scopes: Scopes,
-    interpreter: &'a mut Interpreter,
+    locals: &'a mut HashMap<ResolvableExpr, usize>,
 }
 
 impl<'a> Resolver<'a> {
-    fn new(interpreter: &'a mut Interpreter) -> Self {
-        Self {
+    fn new(locals: &'a mut HashMap<ResolvableExpr, usize>) -> Self {
+        let mut new_res = Self {
             scopes: Scopes::new(),
-            interpreter,
-        }
+            locals,
+        };
+        new_res.begin_scope();
+        new_res
     }
 
     fn resolve(&mut self, statements: Vec<Stmt>) -> Result<(), ResolverError> {
@@ -59,7 +62,8 @@ impl<'a> Resolver<'a> {
             Stmt::Var(variable_declaration) => {
                 self.declare(variable_declaration.name.clone())?;
                 self.resolve_expression(variable_declaration.initializer)?;
-                self.define(variable_declaration.name)?;
+                self.define(variable_declaration.name.clone())?;
+                self.resolve_local(variable_declaration.name)?;
             }
             Stmt::Function(function_stmt) => {
                 self.declare(function_stmt.name.clone())?;
@@ -147,17 +151,16 @@ impl<'a> Resolver<'a> {
         Ok(())
     }
 
+    /// Get depth of variable in stack at time of function call.
     fn resolve_local(&mut self, name: String) -> Result<(), ResolverError> {
         if self.scopes.len() == 0 {
             // Must be global scope
             return Ok(());
         }
-        for i in self.scopes.len() - 1..=0 {
+        for i in (0..self.scopes.len()).rev() {
             if self.scopes[i].contains_key(&name) {
-                self.interpreter.resolve(
-                    ResolvableExpr::Variable(name.clone()),
-                    self.scopes.len() - 1 - i,
-                );
+                self.locals
+                    .insert(ResolvableExpr::Variable(name.clone()), i);
             }
         }
         Ok(())
@@ -190,5 +193,47 @@ impl<'a> Resolver<'a> {
 
     fn end_scope(&mut self) {
         self.scopes.pop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::parsing::{BlockStatement, Expr, ResolvableExpr, Stmt, VariableDeclaration};
+
+    use super::resolve;
+
+    #[test]
+    fn test_resolve() {
+        // var x = 0;
+        // {
+        //     var y = 0;
+        //     print x;
+        // }
+        let statements = vec![
+            Stmt::Var(VariableDeclaration {
+                name: "x".to_string(),
+                initializer: Expr::Number(0.0),
+            }),
+            Stmt::Block(BlockStatement(vec![
+                Stmt::Var(VariableDeclaration {
+                    name: "y".to_string(),
+                    initializer: Expr::Number(0.0),
+                }),
+                Stmt::Print(Expr::Variable("x".to_string())),
+            ])),
+        ];
+        let locals = match resolve(statements) {
+            Ok(v) => v,
+            Err(_) => panic!("Should run without error."),
+        };
+        assert_eq!(
+            locals,
+            HashMap::<ResolvableExpr, usize>::from_iter([
+                (ResolvableExpr::Variable("x".to_string()), 0),
+                (ResolvableExpr::Variable("y".to_string()), 1)
+            ])
+        );
     }
 }

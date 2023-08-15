@@ -6,6 +6,11 @@ use super::{
     values::Value,
 };
 
+pub fn construct_global_values() -> HashMap<String, Rc<RefCell<Value>>> {
+    let clock = Value::NativeFunction(NativeFunction::Clock);
+    HashMap::from([("clock".to_string(), Rc::new(RefCell::new(clock)))])
+}
+
 pub trait Environment: Debug + EnvironmentClone {
     fn push(&mut self);
     fn pop(&mut self);
@@ -58,11 +63,6 @@ impl Clone for Box<dyn Environment> {
 pub struct RefCellEnvironment {
     values: Vec<Rc<RefCell<HashMap<String, Rc<RefCell<Value>>>>>>,
     pos: usize,
-}
-
-fn construct_global_values() -> HashMap<String, Rc<RefCell<Value>>> {
-    let clock = Value::NativeFunction(NativeFunction::Clock);
-    HashMap::from([("clock".to_string(), Rc::new(RefCell::new(clock)))])
 }
 
 impl RefCellEnvironment {
@@ -133,13 +133,15 @@ impl Environment for RefCellEnvironment {
         distance: &usize,
         name: &str,
     ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
-        let idx = self.values.len() - distance - 1;
-        let values = self.values.get(idx).ok_or::<RuntimeErrorOrReturnValue>(
-            RuntimeError {
-                message: "Location in stack not found.".to_string(),
-            }
-            .into(),
-        )?;
+        let values = self
+            .values
+            .get(*distance)
+            .ok_or::<RuntimeErrorOrReturnValue>(
+                RuntimeError {
+                    message: "Location in stack not found.".to_string(),
+                }
+                .into(),
+            )?;
         if let Some(v) = values.borrow().get(name) {
             return Ok(v.clone());
         }

@@ -84,11 +84,8 @@ impl LoxCallable for LoxFunction {
         for (arg, param) in arguments.into_iter().zip(self.function.params.iter()) {
             self.environment.define(param.clone(), arg);
         }
-        let mut interpreter: Interpreter = if self.with_resolver {
-            Interpreter::new(self.environment.clone())
-        } else {
-            Interpreter::new_without_resolver(self.environment.clone())
-        };
+        let mut interpreter: Interpreter =
+            Interpreter::new_without_resolver(self.environment.clone());
 
         for stmt in &self.function.body {
             match interpreter.execute(stmt.clone()) {

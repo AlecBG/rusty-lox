@@ -58,7 +58,7 @@ pub fn run_file(path: &Path) {
 }
 
 pub fn run_prompt() {
-    let mut interpreter = Interpreter::new(Box::new(RefCellEnvironment::new()));
+    let mut interpreter = Interpreter::new_without_resolver(Box::new(RefCellEnvironment::new()));
     loop {
         let mut buffer = String::new();
         print!("> ");
@@ -124,8 +124,9 @@ fn run(source: &str) -> Result<(), LoxError> {
         }
     };
 
-    let mut interpreter = Interpreter::new(Box::new(RefCellEnvironment::new()));
-    resolve(&mut interpreter, statements.clone()).map_err(LoxError::ResolverError)?;
+    let locals = resolve(statements.clone()).map_err(LoxError::ResolverError)?;
+    let mut interpreter = Interpreter::new(Box::new(RefCellEnvironment::new()), locals);
+    // let mut interpreter = Interpreter::new_without_resolver(Box::new(RefCellEnvironment::new()));
     let interpret_result = interpreter.execute_statements(statements);
     match interpret_result {
         Ok(_) => {}

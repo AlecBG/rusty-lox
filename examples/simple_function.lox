@@ -1,0 +1,5 @@
+fun getString() {
+    return "Hello world!";
+}
+
+print getString();
