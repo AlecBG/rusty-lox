@@ -1,53 +1,21 @@
 use std::convert::TryFrom;
-use std::error::Error;
-use std::fmt::Display;
 
 use crate::scanning::Token;
 use crate::scanning::TokenType;
 
 use super::expression::{BinaryOperator, Expr, UnaryOperator};
+use super::function_types::FunctionType;
 use super::statement::Stmt;
 use super::BlockStatement;
+use super::ClassStatement;
 use super::FunctionStatement;
 use super::IfStatement;
 use super::LogicalOperator;
+use super::ParserError;
+use super::ParserErrors;
 use super::ReturnStatement;
 use super::VariableDeclaration;
 use super::WhileStatement;
-
-#[derive(Debug)]
-pub struct ParserError {
-    pub token: Token,
-    pub message: String,
-}
-
-impl Display for ParserError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&format!(
-            "Parser error: {} at token {} on line {}",
-            self.message, self.token, self.token.line
-        ))
-    }
-}
-
-impl Error for ParserError {}
-
-#[derive(Debug)]
-pub struct ParserErrors {
-    pub errors: Vec<ParserError>,
-}
-
-impl Display for ParserErrors {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Parser errors:")?;
-        for error in &self.errors {
-            f.write_str(&format!("\n    {error}"))?;
-        }
-        Ok(())
-    }
-}
-
-impl Error for ParserErrors {}
 
 pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, ParserErrors> {
     let mut parser = Parser::new(tokens);
@@ -85,8 +53,11 @@ impl Parser {
     }
 
     fn parse_declaration(&mut self) -> Result<Stmt, ParserError> {
-        let result = if self.matches(&[TokenType::Fun]) {
-            self.parse_function_declaration().map(Stmt::Function)
+        let result = if self.matches(&[TokenType::Class]) {
+            self.parse_class_declaration().map(Stmt::Class)
+        } else if self.matches(&[TokenType::Fun]) {
+            self.parse_function_declaration(FunctionType::Function)
+                .map(Stmt::Function)
         } else if self.matches(&[TokenType::Var]) {
             self.parse_variable_declaration().map(Stmt::Var)
         } else {
@@ -101,13 +72,41 @@ impl Parser {
         }
     }
 
-    fn parse_function_declaration(&mut self) -> Result<FunctionStatement, ParserError> {
+    fn parse_class_declaration(&mut self) -> Result<ClassStatement, ParserError> {
         let name = match self.peek().token_type.clone() {
-            TokenType::Identifier(name) => name,
+            TokenType::Identifier(n) => n.clone(),
             _ => return Err(Parser::error(self.peek(), "Expect function name")),
         };
         self.advance();
-        self.consume(TokenType::LeftParen, "Expect '(' after function name")?;
+        self.consume(TokenType::LeftBrace, "Expect '{' after class name")?;
+        let mut methods: Vec<FunctionStatement> = vec![];
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            methods.push(self.parse_function_declaration(FunctionType::Method)?);
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after class body")?;
+
+        Ok(ClassStatement { name, methods })
+    }
+
+    fn parse_function_declaration(
+        &mut self,
+        function_type: FunctionType,
+    ) -> Result<FunctionStatement, ParserError> {
+        let name = match self.peek().token_type.clone() {
+            TokenType::Identifier(name) => name,
+            _ => {
+                return Err(Parser::error(
+                    self.peek(),
+                    &format!("Expect {function_type} name"),
+                ))
+            }
+        };
+        self.advance();
+        self.consume(
+            TokenType::LeftParen,
+            &format!("Expect '(' after {function_type} name"),
+        )?;
         let mut params: Vec<String> = vec![];
         if self.peek().token_type != TokenType::RightParen {
             loop {
@@ -117,19 +116,17 @@ impl Parser {
                         if params.len() > 255 {
                             return Err(Self::error(
                                 self.peek(),
-                                "Cannot have more than 255 parameters in a function declaration",
+                                &format!("Cannot have more than 255 parameters in a {function_type} declaration"),
                             ));
                         }
                         self.advance();
                         match self.peek().token_type.clone() {
                             TokenType::Comma => self.advance(),
                             TokenType::RightParen => break,
-                            _ => {
-                                return Err(Self::error(
-                                    self.peek(),
-                                    "Expect ')' or ',' after parameter in function signature",
-                                ))
-                            }
+                            _ => return Err(Self::error(
+                                self.peek(),
+                                &format!("Expect ')' or ',' after parameter in {function_type} signature"),
+                            )),
                         }
                     }
                     _ => return Err(Parser::error(self.peek(), "Expected parameter name")),
@@ -137,7 +134,10 @@ impl Parser {
             }
         }
         self.consume(TokenType::RightParen, "Expect ')' after parameters")?;
-        self.consume(TokenType::LeftBrace, "Expect '{' before function body")?;
+        self.consume(
+            TokenType::LeftBrace,
+            &format!("Expect '{{' before {function_type} body"),
+        )?;
         let block_stmt = self.parse_block_statement()?;
         Ok(FunctionStatement {
             name,

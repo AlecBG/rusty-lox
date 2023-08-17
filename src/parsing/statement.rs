@@ -13,6 +13,12 @@ pub struct FunctionStatement {
 pub struct BlockStatement(pub Vec<Stmt>);
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct ClassStatement {
+    pub name: String,
+    pub methods: Vec<FunctionStatement>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct VariableDeclaration {
     pub name: String,
     pub initializer: Expr,
@@ -49,6 +55,7 @@ pub enum Stmt {
     Block(BlockStatement),
     Expression(Expr),
     Function(FunctionStatement),
+    Class(ClassStatement),
     Print(Expr),
     Var(VariableDeclaration),
     If(IfStatement),

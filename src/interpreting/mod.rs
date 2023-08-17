@@ -1,3 +1,4 @@
+mod classes;
 mod environment;
 pub use environment::RefCellEnvironment;
 mod functions;

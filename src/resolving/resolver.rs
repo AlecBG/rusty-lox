@@ -1,6 +1,6 @@
 use std::{collections::HashMap, error::Error, fmt::Display};
 
-use crate::parsing::{Expr, FunctionStatement, ResolvableExpr, Stmt};
+use crate::parsing::{ClassStatement, Expr, FunctionStatement, ResolvableExpr, Stmt};
 
 #[derive(Debug)]
 pub struct ResolverError {
@@ -58,6 +58,10 @@ impl<'a> Resolver<'a> {
                 self.begin_scope();
                 self.resolve(block_statement.0)?;
                 self.end_scope();
+            }
+            Stmt::Class(ClassStatement { name, methods: _ }) => {
+                self.declare(name.clone());
+                self.define(name);
             }
             Stmt::Var(variable_declaration) => {
                 self.declare(variable_declaration.name.clone())?;

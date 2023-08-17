@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use super::classes::LoxClass;
 use super::environment::Environment;
 use super::functions::{LoxCallable, LoxFunction};
 use super::runtime_errors::{RuntimeError, RuntimeErrorOrReturnValue};
@@ -57,6 +58,14 @@ impl Interpreter {
                     self.execute(stmt)?;
                 }
                 self.environment.pop();
+                Ok(())
+            }
+            Stmt::Class(class_statement) => {
+                let class_name = class_statement.name.clone();
+                let lox_class = LoxClass {
+                    name: class_name.clone(),
+                };
+                self.environment.define(class_name, Value::Class(lox_class));
                 Ok(())
             }
             Stmt::Function(function) => {
