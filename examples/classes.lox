@@ -1,7 +1,0 @@
-class DevonshireCream {
-    serveOn() {
-        return "scones";
-    }
-}
-
-print DevonshireCream;

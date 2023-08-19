@@ -73,11 +73,7 @@ impl Parser {
     }
 
     fn parse_class_declaration(&mut self) -> Result<ClassStatement, ParserError> {
-        let name = match self.peek().token_type.clone() {
-            TokenType::Identifier(n) => n.clone(),
-            _ => return Err(Parser::error(self.peek(), "Expect function name")),
-        };
-        self.advance();
+        let name = self.consume_identifier("Expect function name")?;
         self.consume(TokenType::LeftBrace, "Expect '{' after class name")?;
         let mut methods: Vec<FunctionStatement> = vec![];
         while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
@@ -93,16 +89,7 @@ impl Parser {
         &mut self,
         function_type: FunctionType,
     ) -> Result<FunctionStatement, ParserError> {
-        let name = match self.peek().token_type.clone() {
-            TokenType::Identifier(name) => name,
-            _ => {
-                return Err(Parser::error(
-                    self.peek(),
-                    &format!("Expect {function_type} name"),
-                ))
-            }
-        };
-        self.advance();
+        let name = self.consume_identifier("Expect {function_type} name")?;
         self.consume(
             TokenType::LeftParen,
             &format!("Expect '(' after {function_type} name"),
@@ -357,27 +344,26 @@ impl Parser {
             Ok(e) => e,
             Err(err) => return Err(err),
         };
-        if self.matches(&[TokenType::Equal]) {
-            let value = match self.parse_assignment() {
-                Ok(v) => v,
-                Err(err) => return Err(err),
-            };
-            match expression {
-                Expr::Variable(name) => {
-                    return Ok(Expr::Assign {
-                        name,
-                        expression: Box::new(value),
-                    })
-                }
-                _ => {
-                    return Err(ParserError {
-                        token: self.peek().clone(),
-                        message: "Invalid assignment target.".to_string(),
-                    })
-                }
-            };
+        if !self.matches(&[TokenType::Equal]) {
+            return Ok(expression);
         }
-        Ok(expression)
+
+        let value = Box::new(self.parse_assignment()?);
+        match expression {
+            Expr::Variable(name) => Ok(Expr::Assign {
+                name,
+                expression: value,
+            }),
+            Expr::Get { object, name } => Ok(Expr::Set {
+                object,
+                name,
+                value,
+            }),
+            _ => Err(ParserError {
+                token: self.peek().clone(),
+                message: "Invalid assignment target.".to_string(),
+            }),
+        }
     }
 
     fn parse_or(&mut self) -> Result<Expr, ParserError> {
@@ -545,6 +531,12 @@ impl Parser {
         loop {
             if self.matches(&[TokenType::LeftParen]) {
                 expr = self.finish_call(expr)?;
+            } else if self.matches(&[TokenType::Dot]) {
+                let name = self.consume_identifier("Expect property name after '.'")?;
+                expr = Expr::Get {
+                    object: Box::new(expr),
+                    name,
+                }
             } else {
                 break;
             }
@@ -590,6 +582,7 @@ impl Parser {
             TokenType::False => Expr::Boolean(false),
             TokenType::True => Expr::Boolean(true),
             TokenType::Nil => Expr::Nil,
+            TokenType::This => Expr::This(self.peek().clone()),
             TokenType::Number(x) => Expr::Number(x),
             TokenType::String(x) => Expr::String(x),
             TokenType::LeftParen => {
@@ -648,6 +641,15 @@ impl Parser {
             return Ok(self.advance());
         }
         Err(Parser::error(self.peek(), message))
+    }
+
+    fn consume_identifier(&mut self, message: &str) -> Result<String, ParserError> {
+        let name = match self.peek().token_type.clone() {
+            TokenType::Identifier(n) => n.clone(),
+            _ => return Err(Parser::error(self.peek(), message)),
+        };
+        self.advance();
+        Ok(name)
     }
 
     fn error(token: &Token, message: &str) -> ParserError {

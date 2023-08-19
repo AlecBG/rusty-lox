@@ -6,6 +6,7 @@ use std::{
 use crate::parsing::FunctionStatement;
 
 use super::{
+    classes::LoxInstance,
     environment::Environment,
     runtime_errors::{RuntimeError, RuntimeErrorOrReturnValue},
     values::{Value, ValueType},
@@ -63,6 +64,18 @@ pub struct LoxFunction {
     pub function: FunctionStatement,
     pub environment: Box<dyn Environment>,
     pub with_resolver: bool,
+}
+
+impl LoxFunction {
+    pub fn bind(&self, instance: LoxInstance) -> Self {
+        let mut environment = self.environment.clone();
+        environment.define("this".to_string(), Value::Instance(instance));
+        Self {
+            function: self.function.clone(),
+            environment,
+            with_resolver: self.with_resolver,
+        }
+    }
 }
 
 impl LoxCallable for LoxFunction {

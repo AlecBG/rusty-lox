@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use super::{
-    classes::LoxClass,
+    classes::{LoxClass, LoxInstance},
     functions::{LoxFunction, NativeFunction},
 };
 
@@ -12,6 +12,7 @@ pub enum ValueType {
     Boolean,
     Nil,
     Class { name: String },
+    Instance { class_name: String },
     Function { num_args: usize },
 }
 
@@ -22,6 +23,7 @@ pub enum Value {
     Boolean(bool),
     Nil,
     Class(LoxClass),
+    Instance(LoxInstance),
     Function(LoxFunction),
     NativeFunction(NativeFunction),
 }
@@ -38,6 +40,9 @@ impl Value {
             },
             Value::Class(class) => ValueType::Class {
                 name: class.name.clone(),
+            },
+            Value::Instance(instance) => ValueType::Instance {
+                class_name: instance.class.name.clone(),
             },
             Value::NativeFunction(f) => f.get_type(),
         }
@@ -68,6 +73,7 @@ impl Display for Value {
                 with_resolver: _,
             }) => f.write_str(&format!("{function:?}")),
             Value::Class(lox_class) => f.write_str(&format!("{lox_class}")),
+            Value::Instance(instance) => f.write_str(&format!("{instance}")),
             Value::NativeFunction(func) => f.write_str(&format!("{func}")),
         }
     }

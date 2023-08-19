@@ -1,0 +1,13 @@
+class DevonshireCream {
+    serveOn() {
+        return "scones";
+    }
+}
+
+print DevonshireCream;
+
+var instance = DevonshireCream();
+print instance;
+instance.weight = 10;
+print instance.weight;
+print instance.serveOn();

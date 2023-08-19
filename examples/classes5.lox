@@ -1,0 +1,9 @@
+class A {
+    do() {
+        this.x = "x";
+    }
+}
+
+var a = A();
+a.do();
+print a.x;

@@ -1,0 +1,15 @@
+class A {
+    setX(x) {
+        this.x = x;
+    }
+
+    add(a, b) {
+        return a + b;
+    }
+}
+
+var a = A();
+print a.add(1, 4);
+
+a.setX(4);
+print a.add(1, a.x);

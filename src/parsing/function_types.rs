@@ -1,9 +1,10 @@
 use std::fmt::Display;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum FunctionType {
     Function,
     Method,
+    None, // Not a function
 }
 
 impl Display for FunctionType {
@@ -11,6 +12,7 @@ impl Display for FunctionType {
         match self {
             Self::Function => f.write_str("function"),
             Self::Method => f.write_str("method"),
+            Self::None => f.write_str("NOT A FUNCTION"),
         }
     }
 }

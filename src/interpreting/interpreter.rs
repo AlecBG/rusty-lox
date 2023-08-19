@@ -62,8 +62,26 @@ impl Interpreter {
             }
             Stmt::Class(class_statement) => {
                 let class_name = class_statement.name.clone();
+                let methods: HashMap<String, LoxFunction> = class_statement
+                    .methods
+                    .into_iter()
+                    .map(|m| {
+                        let mut environment = self.environment.clone();
+                        environment.push();
+                        (
+                            m.clone().name,
+                            LoxFunction {
+                                function: m,
+                                environment,
+                                with_resolver: self.with_resolver,
+                            },
+                        )
+                    })
+                    .collect();
+
                 let lox_class = LoxClass {
                     name: class_name.clone(),
+                    methods,
                 };
                 self.environment.define(class_name, Value::Class(lox_class));
                 Ok(())
@@ -171,6 +189,36 @@ impl Interpreter {
                 paren,
                 arguments,
             } => self.evaluate_call_expression(*callee, paren, arguments),
+            Expr::Get { object, name } => {
+                let obj_value = self.evaluate(*object)?;
+                let o = &*obj_value.borrow();
+                match o {
+                    Value::Instance(instance) => instance.get(&name).map_err(|e| e.into()),
+                    _ => Err(RuntimeError {
+                        message: "Only instances have properties".to_string(),
+                    }
+                    .into()),
+                }
+            }
+            Expr::Set {
+                object,
+                name,
+                value,
+            } => {
+                let obj_value = self.evaluate(*object)?;
+                let v = self.evaluate(*value)?;
+                let o = &mut *obj_value.borrow_mut();
+                match o {
+                    Value::Instance(instance) => {
+                        instance.set(name, v.clone());
+                        Ok(v.clone())
+                    }
+                    _ => Err(RuntimeError {
+                        message: "Only instances have fields".to_string(),
+                    }
+                    .into()),
+                }
+            }
             Expr::LogicalOperator {
                 left,
                 operator,
@@ -181,6 +229,14 @@ impl Interpreter {
                 expression,
             } => self.evaluate_unary_expression(*expression, operator),
             Expr::Grouping(expression) => self.evaluate(*expression),
+            Expr::This(_) => {
+                if self.with_resolver {
+                    let resolvable_expr = ResolvableExpr::Variable("this".to_string());
+                    self.lookup_variable(resolvable_expr)
+                } else {
+                    self.environment.get("this")
+                }
+            }
             Expr::Number(x) => Ok(Rc::new(RefCell::new(Value::Number(x)))),
             Expr::String(x) => Ok(Rc::new(RefCell::new(Value::String(x)))),
             Expr::Boolean(x) => Ok(Rc::new(RefCell::new(Value::Boolean(x)))),
@@ -394,14 +450,16 @@ impl Interpreter {
         }
 
         let c_v = &mut *callee_value.borrow_mut();
-        match c_v {
-            Value::Function(f) => f.call(args).map(|x| Rc::new(RefCell::new(x))),
-            Value::NativeFunction(f) => f.call(args).map(|x| Rc::new(RefCell::new(x))),
+        let out = match c_v {
+            Value::Function(callable) => callable.call(args),
+            Value::NativeFunction(callable) => callable.call(args),
+            Value::Class(callable) => callable.call(args),
             _ => Err(RuntimeError {
                 message: format!("Can only call functions and classes at {paren:?}"),
             }
             .into()),
-        }
+        }?;
+        Ok(Rc::new(RefCell::new(out)))
     }
 
     fn evaluate_logical_operator_expression(
