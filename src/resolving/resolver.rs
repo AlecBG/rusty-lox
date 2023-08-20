@@ -94,13 +94,8 @@ impl<'a> Resolver<'a> {
                 }
 
                 self.begin_scope();
-                // if let Some(vals) = self.scopes.last_mut() {
                 self.declare("this".to_string())?;
                 self.define("this".to_string())?;
-                // vals.insert("this".to_string(), true);
-                // } else {
-                //     panic!();
-                // }
 
                 for method in methods {
                     let function_type = if method.name == "init" {
@@ -160,7 +155,7 @@ impl<'a> Resolver<'a> {
                 self.resolve_expression(while_stmt.condition)?;
                 self.resolve_statement(*while_stmt.body)?;
             }
-            Stmt::Test(_) => {}
+            Stmt::Test(expr) => self.resolve_expression(expr.value_to_save)?,
         }
         Ok(())
     }
@@ -308,8 +303,12 @@ impl<'a> Resolver<'a> {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::parsing::{
-        BlockStatement, Expr, ResolvableExpr, Stmt, Variable, VariableDeclaration,
+    use crate::{
+        parsing::{
+            BlockStatement, ClassStatement, Expr, FunctionStatement, ResolvableExpr,
+            ReturnStatement, Stmt, Variable, VariableDeclaration,
+        },
+        scanning::{Token, TokenType},
     };
 
     use super::resolve;
@@ -413,5 +412,62 @@ mod tests {
                 )
             ])
         );
+    }
+
+    #[test]
+    fn test_class_resolution() {
+        // class Thing {
+        //     getCallback() {
+        //         fun localFunction() {
+        //             print this;
+        //         }
+        //        return localFunction;
+        //    }
+        // }
+        let local_function = FunctionStatement {
+            name: "localFunction".to_string(),
+            params: vec![],
+            body: vec![Stmt::Print(Expr::This { line_number: 4 })],
+        };
+        let get_callback = FunctionStatement {
+            name: "getCallback".to_string(),
+            params: vec![],
+            body: vec![
+                Stmt::Function(local_function),
+                Stmt::Return(ReturnStatement {
+                    return_token: Token {
+                        token_type: TokenType::Return,
+                        line: 6,
+                    },
+                    value: Expr::Variable(Variable {
+                        name: "localFunction".to_string(),
+                        line_number: 6,
+                    }),
+                }),
+            ],
+        };
+        let statements = vec![Stmt::Class(ClassStatement {
+            name: "Thing".to_string(),
+            line_number: 1,
+            superclass: None,
+            methods: vec![get_callback],
+        })];
+        let locals = match resolve(statements) {
+            Ok(v) => v,
+            Err(_) => panic!("Should run without error."),
+        };
+        assert_eq!(
+            locals,
+            HashMap::<ResolvableExpr, usize>::from_iter([
+                (ResolvableExpr::This { line_number: 4 }, 1),
+                (
+                    ResolvableExpr::Variable(Variable {
+                        name: "localFunction".to_string(),
+                        line_number: 6
+                    }),
+                    2
+                )
+            ])
+        )
     }
 }

@@ -6,5 +6,5 @@ var a = "global";
 
     showA();
     var a = "block";
-    showA();
+    showA();  // Prints global because the global one is defined in a higher scope.
 }

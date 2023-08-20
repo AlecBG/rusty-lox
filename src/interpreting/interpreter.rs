@@ -122,8 +122,7 @@ impl Interpreter {
                 Ok(())
             }
             Stmt::Function(function) => {
-                let mut environment = self.environment.clone();
-                environment.push();
+                let environment = self.environment.clone();
                 let lox_function = LoxFunction {
                     function,
                     environment,
@@ -612,12 +611,13 @@ mod tests {
         interpreting::{
             environment::{RefCellEnvironment, SingleCopyEnvironment},
             interpreter::Value,
-            runtime_errors::RuntimeErrorOrReturnValue,
+            RuntimeError,
         },
         parsing::{
             BinaryOperator, BlockStatement, Expr, FunctionStatement, IfStatement, ReturnStatement,
             SaveExpression, Stmt, Variable, VariableDeclaration,
         },
+        resolving::resolve,
         scanning::{Token, TokenType},
     };
 
@@ -626,7 +626,7 @@ mod tests {
         // var x = 0;
         // <SAVE VALUE OF x>
         let saved_values: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(vec![]));
-        let program = Stmt::Block(BlockStatement(vec![
+        let stmts = vec![
             Stmt::Var(VariableDeclaration {
                 name: "x".to_string(),
                 initializer: Expr::Number(0.0),
@@ -638,10 +638,11 @@ mod tests {
                 }),
                 values: saved_values.clone(),
             }),
-        ]));
+        ];
         let environment = Box::new(RefCellEnvironment::new());
-        let mut interpreter = Interpreter::new_without_resolver(environment);
-        match interpreter.execute(program) {
+        let locals = resolve(stmts.clone()).expect("Should resolve without error");
+        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
+        match interpreter.execute_statements(stmts) {
             Ok(_) => {}
             Err(e) => {
                 println!("{e:#?}");
@@ -659,7 +660,7 @@ mod tests {
         // var x = f();
         // <SAVE VALUE OF x>
         let saved_values: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(vec![]));
-        let program = Stmt::Block(BlockStatement(vec![
+        let stmts = vec![
             Stmt::Function(FunctionStatement {
                 name: "f".to_string(),
                 params: vec![],
@@ -692,10 +693,11 @@ mod tests {
                 }),
                 values: saved_values.clone(),
             }),
-        ]));
+        ];
         let environment = Box::new(RefCellEnvironment::new());
-        let mut interpreter = Interpreter::new_without_resolver(environment);
-        match interpreter.execute(program) {
+        let locals = resolve(stmts.clone()).expect("Should resolve without error");
+        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
+        match interpreter.execute_statements(stmts) {
             Ok(_) => {}
             Err(e) => {
                 println!("{e:#?}");
@@ -783,7 +785,7 @@ mod tests {
                 }),
             ],
         });
-        let program = Stmt::Block(BlockStatement(vec![
+        let stmts = vec![
             Stmt::Var(VariableDeclaration {
                 name: "numCalls".to_string(),
                 initializer: Expr::Number(0.0),
@@ -800,10 +802,11 @@ mod tests {
                 },
                 arguments: vec![Expr::Number(3.0)],
             }),
-        ]));
+        ];
         let environment = Box::new(RefCellEnvironment::new());
-        let mut interpreter = Interpreter::new_without_resolver(environment);
-        match interpreter.execute(program) {
+        let locals = resolve(stmts.clone()).expect("Should resolve without error");
+        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
+        match interpreter.execute_statements(stmts) {
             Ok(_) => {}
             Err(e) => {
                 println!("{e:#?}");
@@ -889,7 +892,7 @@ mod tests {
         // f = outer();
         // f();
         // f();
-        let program = Stmt::Block(BlockStatement(vec![
+        let stmts = vec![
             outer_function_stmt,
             Stmt::Var(VariableDeclaration {
                 name: "f".to_string(),
@@ -927,11 +930,12 @@ mod tests {
                 },
                 arguments: vec![],
             }),
-        ]));
+        ];
         // If we use the refcell environment, then we find that the value of x has been increased by one.
         let environment = Box::new(RefCellEnvironment::new());
-        let mut interpreter = Interpreter::new_without_resolver(environment);
-        match interpreter.execute(program.clone()) {
+        let locals = resolve(stmts.clone()).expect("Should resolve without error");
+        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
+        match interpreter.execute_statements(stmts.clone()) {
             Ok(_) => {}
             Err(e) => {
                 println!("{e:#?}");
@@ -947,8 +951,9 @@ mod tests {
 
         // If we use the single copy environment, then we find that the value of x is unchanged by the closure.
         let environment = Box::new(SingleCopyEnvironment::new());
-        let mut interpreter = Interpreter::new_without_resolver(environment);
-        match interpreter.execute(program) {
+        let locals = resolve(stmts.clone()).expect("Should resolve without error");
+        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
+        match interpreter.execute_statements(stmts) {
             Ok(_) => {}
             Err(e) => {
                 println!("{e:#?}");
@@ -964,7 +969,7 @@ mod tests {
     #[test]
     fn test_native_clock() {
         // clock();
-        let program = Stmt::Block(BlockStatement(vec![Stmt::Expression(Expr::Call {
+        let stmts = vec![Stmt::Expression(Expr::Call {
             callee: Box::new(Expr::Variable(Variable {
                 name: "clock".to_string(),
                 line_number: 1,
@@ -974,10 +979,11 @@ mod tests {
                 line: 5,
             },
             arguments: vec![],
-        })]));
+        })];
         let environment = Box::new(RefCellEnvironment::new());
-        let mut interpreter = Interpreter::new_without_resolver(environment);
-        match interpreter.execute(program.clone()) {
+        let locals = resolve(stmts.clone()).expect("Should resolve without error");
+        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
+        match interpreter.execute_statements(stmts.clone()) {
             Ok(_) => {}
             Err(e) => {
                 println!("{e:#?}");
@@ -985,8 +991,9 @@ mod tests {
             }
         };
         let environment = Box::new(SingleCopyEnvironment::new());
-        let mut interpreter = Interpreter::new_without_resolver(environment);
-        match interpreter.execute(program) {
+        let locals = resolve(stmts.clone()).expect("Should resolve without error");
+        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
+        match interpreter.execute_statements(stmts) {
             Ok(_) => {}
             Err(e) => {
                 println!("{e:#?}");
@@ -1001,7 +1008,7 @@ mod tests {
         //   var a = 1;
         // }
         // print a;  // expect exception here
-        let program = Stmt::Block(BlockStatement(vec![
+        let stmts = vec![
             Stmt::Block(BlockStatement(vec![Stmt::Var(VariableDeclaration {
                 name: "a".to_string(),
                 initializer: Expr::Number(1.0),
@@ -1010,28 +1017,20 @@ mod tests {
                 name: "a".to_string(),
                 line_number: 2,
             })),
-        ]));
+        ];
         let environment = Box::new(RefCellEnvironment::new());
-        let mut interpreter = Interpreter::new_without_resolver(environment);
-        match interpreter.execute(program.clone()) {
+        let locals = resolve(stmts.clone()).expect("Should resolve without error");
+        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
+        match interpreter.execute_statements(stmts.clone()) {
             Ok(_) => panic!("Should throw runtime exception"),
-            Err(e) => match e {
-                RuntimeErrorOrReturnValue::RuntimeError(x) => {
-                    assert!(x.message.contains("Undefined variable 'a'"))
-                }
-                _ => panic!("Should throw runtime exception"),
-            },
+            Err(RuntimeError { message }) => assert!(message.contains("Undefined variable 'a'")),
         };
         let environment = Box::new(SingleCopyEnvironment::new());
-        let mut interpreter = Interpreter::new_without_resolver(environment);
-        match interpreter.execute(program.clone()) {
+        let locals = resolve(stmts.clone()).expect("Should resolve without error");
+        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
+        match interpreter.execute_statements(stmts) {
             Ok(_) => panic!("Should throw runtime exception"),
-            Err(e) => match e {
-                RuntimeErrorOrReturnValue::RuntimeError(x) => {
-                    assert!(x.message.contains("Undefined variable 'a'"))
-                }
-                _ => panic!("Should throw runtime exception"),
-            },
+            Err(RuntimeError { message }) => assert!(message.contains("Undefined variable 'a'")),
         };
     }
 }

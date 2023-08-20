@@ -1,0 +1,11 @@
+{
+    var a = "value1";
+
+    fun showA() {
+        print a;
+    }
+
+    showA();
+    a = "value2";
+    showA();  // Prints 'value2'
+}

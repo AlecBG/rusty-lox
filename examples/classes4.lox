@@ -12,6 +12,5 @@ var thing = Thing();
 var c = thing.getCallback();
 c();
 
-
 var callback = Thing().getCallback();
 callback();

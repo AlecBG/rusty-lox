@@ -34,6 +34,8 @@ pub trait Environment: Debug + EnvironmentClone {
         name: &str,
     ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue>;
     fn get_depth(&self) -> usize;
+
+    fn debug(&self);
 }
 
 /// This is using a trick found https://stackoverflow.com/questions/30353462/how-to-clone-a-struct-storing-a-boxed-trait-object
@@ -186,6 +188,16 @@ impl Environment for RefCellEnvironment {
     fn get_depth(&self) -> usize {
         self.values.len()
     }
+
+    fn debug(&self) {
+        for (i, vals_ptr) in self.values.iter().enumerate() {
+            println!("Depth {i}");
+            let vals = &*vals_ptr.borrow();
+            for (k, v) in vals {
+                println!("{k}: {}", v.borrow().get_type());
+            }
+        }
+    }
 }
 
 impl Default for RefCellEnvironment {
@@ -296,13 +308,15 @@ impl Environment for SingleCopyEnvironment {
         distance: &usize,
         name: &str,
     ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
-        let idx = self.values.len() - distance - 1;
-        let values = self.values.get(idx).ok_or::<RuntimeErrorOrReturnValue>(
-            RuntimeError {
-                message: "Location in stack not found.".to_string(),
-            }
-            .into(),
-        )?;
+        let values = self
+            .values
+            .get(*distance)
+            .ok_or::<RuntimeErrorOrReturnValue>(
+                RuntimeError {
+                    message: "Location in stack not found.".to_string(),
+                }
+                .into(),
+            )?;
         if let Some(v) = values.get(name) {
             return Ok(v.clone());
         }
@@ -314,5 +328,14 @@ impl Environment for SingleCopyEnvironment {
 
     fn get_depth(&self) -> usize {
         self.values.len()
+    }
+
+    fn debug(&self) {
+        for (i, vals) in self.values.iter().enumerate() {
+            println!("Depth {i}");
+            for (k, v) in vals {
+                println!("{k}: {}", v.borrow().get_type());
+            }
+        }
     }
 }
