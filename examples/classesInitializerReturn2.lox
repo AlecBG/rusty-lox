@@ -1,0 +1,6 @@
+class Foo {
+    init() {
+        // Should return a resolver error, cannot return non-trivial value in a constructor.
+        return 1;
+    }
+}

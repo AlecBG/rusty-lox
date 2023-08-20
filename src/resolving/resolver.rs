@@ -1,8 +1,8 @@
 use std::{collections::HashMap, error::Error, fmt::Display};
 
-use crate::parsing::{
-    ClassStatement, ClassType, Expr, FunctionStatement, FunctionType, ResolvableExpr, Stmt,
-};
+use crate::parsing::{ClassStatement, Expr, FunctionStatement, ResolvableExpr, Stmt};
+
+use super::{class_types::ClassType, function_types::FunctionType};
 
 #[derive(Debug)]
 pub struct ResolverError {
@@ -79,7 +79,12 @@ impl<'a> Resolver<'a> {
                 }
 
                 for method in methods {
-                    self.resolve_function(method, FunctionType::Method)?;
+                    let function_type = if method.name == "init" {
+                        FunctionType::Initializer
+                    } else {
+                        FunctionType::Method
+                    };
+                    self.resolve_function(method, function_type)?;
                 }
                 self.end_scope();
                 self.current_class_type = enclosing_class_type;
@@ -109,6 +114,15 @@ impl<'a> Resolver<'a> {
                     FunctionType::None => Err(ResolverError::new(
                         "Cannot return from outside a function".to_string(),
                     )),
+                    FunctionType::Initializer => {
+                        if return_stmt.value != Expr::Nil {
+                            Err(ResolverError::new(
+                                "Cannot return a value from an initializer.".to_string(),
+                            ))
+                        } else {
+                            self.resolve_expression(return_stmt.value)
+                        }
+                    }
                     FunctionType::Method | FunctionType::Function => {
                         self.resolve_expression(return_stmt.value)
                     }

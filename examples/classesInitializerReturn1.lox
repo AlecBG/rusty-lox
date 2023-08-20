@@ -1,0 +1,14 @@
+class Foo {
+    init(changeX) {
+        this.x = 1;
+        if (!changeX) {
+            return;
+        }
+        this.x = 2;
+    }
+}
+
+var foo1 = Foo(false);
+var foo2 = Foo(true);
+print foo1.x;
+print foo2.x;

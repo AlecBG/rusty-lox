@@ -123,6 +123,11 @@ impl LoxCallable for LoxFunction {
                     }
                     RuntimeErrorOrReturnValue::ReturnValue(v) => {
                         self.environment.pop();
+                        if self.is_initializer {
+                            return self
+                                .environment
+                                .get_at(&(self.environment.get_depth() - 1), "this");
+                        }
                         return Ok(Rc::new(RefCell::new(v)));
                     }
                 },

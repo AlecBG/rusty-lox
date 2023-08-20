@@ -8,4 +8,3 @@ class Foo {
 var foo = Foo();
 print foo.x;
 print foo.init();
-

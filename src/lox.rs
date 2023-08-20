@@ -108,33 +108,26 @@ pub fn run_prompt() {
 }
 
 fn run(source: &str) -> Result<(), LoxError> {
-    let tokens = match scan_tokens(source) {
-        Ok(x) => x,
-        Err(err) => {
-            eprintln!("Error: {err}");
-            return Err(LoxError::SyntaxError(err));
-        }
-    };
+    let tokens = scan_tokens(source).map_err(|e| {
+        eprintln!("Error: {e}");
+        LoxError::SyntaxError(e)
+    })?;
 
-    let statements = match parse(tokens) {
-        Ok(s) => s,
-        Err(err) => {
-            eprintln!("Error: {err}");
-            return Err(LoxError::ParserErrors(err));
-        }
-    };
+    let statements = parse(tokens).map_err(|e| {
+        eprintln!("Error: {e}");
+        LoxError::ParserErrors(e)
+    })?;
 
-    let locals = resolve(statements.clone()).map_err(LoxError::ResolverError)?;
+    let locals = resolve(statements.clone()).map_err(|e| {
+        eprintln!("Error: {e}");
+        LoxError::ResolverError(e)
+    })?;
     let mut interpreter = Interpreter::new(Box::new(RefCellEnvironment::new()), locals);
     // let mut interpreter = Interpreter::new_without_resolver(Box::new(RefCellEnvironment::new()));
-    let interpret_result = interpreter.execute_statements(statements);
-    match interpret_result {
-        Ok(_) => {}
-        Err(err) => {
-            eprintln!("Error: {err}");
-            return Err(LoxError::RuntimeError(err));
-        }
-    };
+    interpreter.execute_statements(statements).map_err(|e| {
+        eprintln!("Error: {e}");
+        LoxError::RuntimeError(e)
+    })?;
 
     Ok(())
 }
