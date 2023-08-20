@@ -211,7 +211,7 @@ impl<'a> Resolver<'a> {
 
     /// Get depth of variable in stack at time of function call.
     fn resolve_local(&mut self, name: String) -> Result<(), ResolverError> {
-        if self.scopes.len() == 0 {
+        if self.scopes.is_empty() {
             // Must be global scope
             return Ok(());
         }

@@ -1,4 +1,9 @@
-use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    fmt::Debug,
+    rc::Rc,
+};
 
 use super::{
     functions::NativeFunction,
@@ -210,8 +215,8 @@ impl Environment for SingleCopyEnvironment {
 
     fn assign(&mut self, name: String, value: Value) -> Result<(), RuntimeErrorOrReturnValue> {
         let pos = self.pos;
-        if self.values[self.pos].contains_key(&name) {
-            self.values[self.pos].insert(name, Rc::new(RefCell::new(value)));
+        if let Entry::Occupied(mut e) = self.values[self.pos].entry(name.clone()) {
+            e.insert(Rc::new(RefCell::new(value)));
             Ok(())
         } else {
             if self.pos == 0 {

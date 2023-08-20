@@ -213,7 +213,7 @@ impl Interpreter {
                 match o {
                     Value::Instance(instance) => {
                         instance.set(name, v.clone());
-                        Ok(v.clone())
+                        Ok(v)
                     }
                     _ => Err(RuntimeError {
                         message: "Only instances have fields".to_string(),

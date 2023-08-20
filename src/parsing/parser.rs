@@ -645,7 +645,7 @@ impl Parser {
 
     fn consume_identifier(&mut self, message: &str) -> Result<String, ParserError> {
         let name = match self.peek().token_type.clone() {
-            TokenType::Identifier(n) => n.clone(),
+            TokenType::Identifier(n) => n,
             _ => return Err(Parser::error(self.peek(), message)),
         };
         self.advance();
