@@ -22,13 +22,13 @@ impl Display for LoxClass {
 impl LoxCallable for LoxClass {
     fn call(
         &mut self,
-        arguments: Vec<super::values::Value>,
-    ) -> Result<Value, RuntimeErrorOrReturnValue> {
+        arguments: Vec<Value>,
+    ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
         let instance = LoxInstance::new(self.clone());
         if let Some(initializer) = instance.find_method("init") {
             initializer.bind(instance.clone()).call(arguments)?;
         }
-        Ok(Value::Instance(instance))
+        Ok(Rc::new(RefCell::new(Value::Instance(instance))))
     }
 }
 

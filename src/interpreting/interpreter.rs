@@ -74,6 +74,7 @@ impl Interpreter {
                                 function: m,
                                 environment,
                                 with_resolver: self.with_resolver,
+                                is_initializer: false,
                             },
                         )
                     })
@@ -93,6 +94,7 @@ impl Interpreter {
                     function,
                     environment,
                     with_resolver: self.with_resolver,
+                    is_initializer: false,
                 };
                 let function_name = lox_function.function.name.clone();
                 self.environment
@@ -459,7 +461,7 @@ impl Interpreter {
             }
             .into()),
         }?;
-        Ok(Rc::new(RefCell::new(out)))
+        Ok(out)
     }
 
     fn evaluate_logical_operator_expression(

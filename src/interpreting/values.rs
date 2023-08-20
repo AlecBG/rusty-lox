@@ -71,6 +71,7 @@ impl Display for Value {
                 function,
                 environment: _,
                 with_resolver: _,
+                is_initializer: _,
             }) => f.write_str(&format!("{function:?}")),
             Value::Class(lox_class) => f.write_str(&format!("{lox_class}")),
             Value::Instance(instance) => f.write_str(&format!("{instance}")),

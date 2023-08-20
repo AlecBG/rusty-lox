@@ -1,5 +1,7 @@
 use std::{
+    cell::RefCell,
     fmt::Display,
+    rc::Rc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -14,7 +16,10 @@ use super::{
 };
 
 pub trait LoxCallable {
-    fn call(&mut self, arguments: Vec<Value>) -> Result<Value, RuntimeErrorOrReturnValue>;
+    fn call(
+        &mut self,
+        arguments: Vec<Value>,
+    ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue>;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,7 +44,10 @@ impl Display for NativeFunction {
 }
 
 impl LoxCallable for NativeFunction {
-    fn call(&mut self, arguments: Vec<Value>) -> Result<Value, RuntimeErrorOrReturnValue> {
+    fn call(
+        &mut self,
+        arguments: Vec<Value>,
+    ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
         match self {
             Self::Clock => {
                 if !arguments.is_empty() {
@@ -48,12 +56,12 @@ impl LoxCallable for NativeFunction {
                     }
                     .into());
                 }
-                Ok(Value::Number(
+                Ok(Rc::new(RefCell::new(Value::Number(
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
                         .as_secs_f64(),
-                ))
+                ))))
             }
         }
     }
@@ -64,6 +72,7 @@ pub struct LoxFunction {
     pub function: FunctionStatement,
     pub environment: Box<dyn Environment>,
     pub with_resolver: bool,
+    pub is_initializer: bool,
 }
 
 impl LoxFunction {
@@ -74,12 +83,16 @@ impl LoxFunction {
             function: self.function.clone(),
             environment,
             with_resolver: self.with_resolver,
+            is_initializer: true,
         }
     }
 }
 
 impl LoxCallable for LoxFunction {
-    fn call(&mut self, arguments: Vec<Value>) -> Result<Value, RuntimeErrorOrReturnValue> {
+    fn call(
+        &mut self,
+        arguments: Vec<Value>,
+    ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
         if arguments.len() != self.function.params.len() {
             return Err(RuntimeError {
                 message: format!(
@@ -110,13 +123,18 @@ impl LoxCallable for LoxFunction {
                     }
                     RuntimeErrorOrReturnValue::ReturnValue(v) => {
                         self.environment.pop();
-                        return Ok(v);
+                        return Ok(Rc::new(RefCell::new(v)));
                     }
                 },
             };
         }
         self.environment.pop();
-        Ok(Value::Nil)
+        if self.is_initializer {
+            self.environment
+                .get_at(&(self.environment.get_depth() - 1), "this")
+        } else {
+            Ok(Rc::new(RefCell::new(Value::Nil)))
+        }
     }
 }
 
