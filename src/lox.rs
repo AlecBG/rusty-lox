@@ -122,7 +122,8 @@ fn run(source: &str) -> Result<(), LoxError> {
         eprintln!("Error: {e}");
         LoxError::ResolverError(e)
     })?;
-    let mut interpreter = Interpreter::new(Box::new(RefCellEnvironment::new()), locals);
+    println!("locals:\n{:#?}", locals);
+    let mut interpreter = Interpreter::new(Box::new(RefCellEnvironment::new()), locals.into());
     // let mut interpreter = Interpreter::new_without_resolver(Box::new(RefCellEnvironment::new()));
     interpreter.execute_statements(statements).map_err(|e| {
         eprintln!("Error: {e}");

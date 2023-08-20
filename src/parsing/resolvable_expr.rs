@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display};
 
-use super::Expr;
+use super::{Expr, Variable};
 
 #[derive(Debug)]
 pub struct ResolutionError {}
@@ -15,7 +15,9 @@ impl Error for ResolutionError {}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum ResolvableExpr {
-    Variable(String),
+    Super { line_number: usize },
+    This { line_number: usize },
+    Variable(Variable),
 }
 
 impl TryFrom<Expr> for ResolvableExpr {
@@ -32,7 +34,9 @@ impl TryFrom<Expr> for ResolvableExpr {
 impl Display for ResolvableExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Variable(name) => f.write_str(name),
+            Self::Variable(var_expr) => f.write_str(&var_expr.name),
+            Self::Super { line_number: _ } => f.write_str("super"),
+            Self::This { line_number: _ } => f.write_str("this"),
         }
     }
 }

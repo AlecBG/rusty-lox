@@ -16,6 +16,22 @@ pub enum ValueType {
     Function { num_args: usize },
 }
 
+impl Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValueType::Number => f.write_str("Number"),
+            ValueType::String => f.write_str("String"),
+            ValueType::Boolean => f.write_str("Boolean"),
+            ValueType::Nil => f.write_str("Nil"),
+            ValueType::Class { name } => f.write_str(&format!("Class<{}>", name)),
+            ValueType::Instance { class_name } => f.write_str(&format!("Instance<{}>", class_name)),
+            ValueType::Function { num_args } => {
+                f.write_str(&format!("Function<{} args>", num_args))
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Number(f64),
@@ -70,6 +86,7 @@ impl Display for Value {
             Value::Function(LoxFunction {
                 function,
                 environment: _,
+                locals: _,
                 with_resolver: _,
                 is_initializer: _,
             }) => f.write_str(&format!("{function:?}")),

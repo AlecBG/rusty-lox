@@ -15,6 +15,8 @@ pub struct BlockStatement(pub Vec<Stmt>);
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClassStatement {
     pub name: String,
+    pub line_number: usize,
+    pub superclass: Option<String>,
     pub methods: Vec<FunctionStatement>,
 }
 

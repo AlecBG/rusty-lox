@@ -1,6 +1,6 @@
 use std::{collections::HashMap, error::Error, fmt::Display};
 
-use crate::parsing::{ClassStatement, Expr, FunctionStatement, ResolvableExpr, Stmt};
+use crate::parsing::{ClassStatement, Expr, FunctionStatement, ResolvableExpr, Stmt, Variable};
 
 use super::{class_types::ClassType, function_types::FunctionType};
 
@@ -65,18 +65,42 @@ impl<'a> Resolver<'a> {
                 self.resolve(block_statement.0)?;
                 self.end_scope();
             }
-            Stmt::Class(ClassStatement { name, methods }) => {
+            Stmt::Class(ClassStatement {
+                name,
+                line_number,
+                methods,
+                superclass,
+            }) => {
                 let enclosing_class_type = self.current_class_type.clone();
                 self.current_class_type = ClassType::Class;
                 self.declare(name.clone())?;
-                self.define(name)?;
+                self.define(name.clone())?;
+                if let Some(sc) = superclass.clone() {
+                    if &sc == &name {
+                        return Err(ResolverError::new(
+                            "A class cannot inherit from itself.".to_string(),
+                        ));
+                    }
+                    self.resolve_expression(Expr::Variable(Variable {
+                        name: sc,
+                        line_number,
+                    }))?;
+                }
+
+                if superclass.is_some() {
+                    self.begin_scope();
+                    self.declare("super".to_string())?;
+                    self.define("super".to_string())?;
+                }
 
                 self.begin_scope();
-                if let Some(vals) = self.scopes.last_mut() {
-                    vals.insert("this".to_string(), true);
-                } else {
-                    panic!();
-                }
+                // if let Some(vals) = self.scopes.last_mut() {
+                self.declare("this".to_string())?;
+                self.define("this".to_string())?;
+                // vals.insert("this".to_string(), true);
+                // } else {
+                //     panic!();
+                // }
 
                 for method in methods {
                     let function_type = if method.name == "init" {
@@ -87,13 +111,17 @@ impl<'a> Resolver<'a> {
                     self.resolve_function(method, function_type)?;
                 }
                 self.end_scope();
+
+                if superclass.is_some() {
+                    self.end_scope();
+                }
+
                 self.current_class_type = enclosing_class_type;
             }
             Stmt::Var(variable_declaration) => {
                 self.declare(variable_declaration.name.clone())?;
                 self.resolve_expression(variable_declaration.initializer)?;
                 self.define(variable_declaration.name.clone())?;
-                self.resolve_local(variable_declaration.name)?;
             }
             Stmt::Function(function_stmt) => {
                 self.declare(function_stmt.name.clone())?;
@@ -157,20 +185,20 @@ impl<'a> Resolver<'a> {
 
     fn resolve_expression(&mut self, expression: Expr) -> Result<(), ResolverError> {
         match &expression {
-            Expr::Variable(name) => {
-                if !self.scopes.is_empty() && (self.peek().get(name) == Some(&false)) {
+            Expr::Variable(var_expr) => {
+                if !self.scopes.is_empty() && (self.peek().get(&var_expr.name) == Some(&false)) {
                     return Err(ResolverError::new(
                         "Cannot read local variable in its own initializer".to_string(),
                     ));
                 }
-                self.resolve_local(name.clone())?;
+                self.resolve_local(ResolvableExpr::Variable(var_expr.clone()))?;
             }
             Expr::Assign {
-                name,
+                variable,
                 expression: expr,
             } => {
                 self.resolve_expression(*expr.clone())?;
-                self.resolve_local(name.clone())?;
+                self.resolve_local(ResolvableExpr::Variable(variable.clone()))?;
             }
             Expr::Binary {
                 left,
@@ -199,6 +227,12 @@ impl<'a> Resolver<'a> {
                     self.resolve_expression(arg.clone())?;
                 }
             }
+            Expr::Super {
+                method: _,
+                line_number,
+            } => self.resolve_local(ResolvableExpr::Super {
+                line_number: *line_number,
+            })?,
             Expr::Get { object, name: _ } => self.resolve_expression(*object.clone())?,
             Expr::Set {
                 object,
@@ -208,13 +242,15 @@ impl<'a> Resolver<'a> {
                 self.resolve_expression(*value.clone())?;
                 self.resolve_expression(*object.clone())?;
             }
-            Expr::This(_) => {
+            Expr::This { line_number } => {
                 if self.current_class_type == ClassType::None {
                     return Err(ResolverError::new(
                         "Cannot use 'this' outside of a class.".to_string(),
                     ));
                 }
-                self.resolve_local("this".to_string())?
+                self.resolve_local(ResolvableExpr::This {
+                    line_number: *line_number,
+                })?
             }
             Expr::Grouping(expr) => self.resolve_expression(*expr.clone())?,
 
@@ -224,15 +260,15 @@ impl<'a> Resolver<'a> {
     }
 
     /// Get depth of variable in stack at time of function call.
-    fn resolve_local(&mut self, name: String) -> Result<(), ResolverError> {
+    fn resolve_local(&mut self, resolvable_expr: ResolvableExpr) -> Result<(), ResolverError> {
         if self.scopes.is_empty() {
             // Must be global scope
             return Ok(());
         }
         for i in (0..self.scopes.len()).rev() {
-            if self.scopes[i].contains_key(&name) {
-                self.locals
-                    .insert(ResolvableExpr::Variable(name.clone()), i);
+            if self.scopes[i].contains_key(&resolvable_expr.to_string()) {
+                self.locals.insert(resolvable_expr.clone(), i);
+                break;
             }
         }
         Ok(())
@@ -272,7 +308,9 @@ impl<'a> Resolver<'a> {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::parsing::{BlockStatement, Expr, ResolvableExpr, Stmt, VariableDeclaration};
+    use crate::parsing::{
+        BlockStatement, Expr, ResolvableExpr, Stmt, Variable, VariableDeclaration,
+    };
 
     use super::resolve;
 
@@ -293,7 +331,63 @@ mod tests {
                     name: "y".to_string(),
                     initializer: Expr::Number(0.0),
                 }),
-                Stmt::Print(Expr::Variable("x".to_string())),
+                Stmt::Print(Expr::Variable(Variable {
+                    name: "x".to_string(),
+                    line_number: 4,
+                })),
+            ])),
+        ];
+        let locals = match resolve(statements) {
+            Ok(v) => v,
+            Err(_) => panic!("Should run without error."),
+        };
+        assert_eq!(
+            locals,
+            HashMap::<ResolvableExpr, usize>::from_iter([(
+                ResolvableExpr::Variable(Variable {
+                    name: "x".to_string(),
+                    line_number: 4
+                }),
+                0
+            ),])
+        );
+    }
+
+    #[test]
+    fn test_resolve2() {
+        // var x = 0;
+        // {
+        //     var y = 0;
+        //     print x;
+        //     {
+        //         var x = 1;
+        //         print x;
+        //     }
+        // }
+        let statements = vec![
+            Stmt::Var(VariableDeclaration {
+                name: "x".to_string(),
+                initializer: Expr::Number(0.0),
+            }),
+            Stmt::Block(BlockStatement(vec![
+                Stmt::Var(VariableDeclaration {
+                    name: "y".to_string(),
+                    initializer: Expr::Number(0.0),
+                }),
+                Stmt::Print(Expr::Variable(Variable {
+                    name: "x".to_string(),
+                    line_number: 4,
+                })),
+                Stmt::Block(BlockStatement(vec![
+                    Stmt::Var(VariableDeclaration {
+                        name: "x".to_string(),
+                        initializer: Expr::Number(0.0),
+                    }),
+                    Stmt::Print(Expr::Variable(Variable {
+                        name: "x".to_string(),
+                        line_number: 7,
+                    })),
+                ])),
             ])),
         ];
         let locals = match resolve(statements) {
@@ -303,8 +397,20 @@ mod tests {
         assert_eq!(
             locals,
             HashMap::<ResolvableExpr, usize>::from_iter([
-                (ResolvableExpr::Variable("x".to_string()), 0),
-                (ResolvableExpr::Variable("y".to_string()), 1)
+                (
+                    ResolvableExpr::Variable(Variable {
+                        name: "x".to_string(),
+                        line_number: 4
+                    }),
+                    0
+                ),
+                (
+                    ResolvableExpr::Variable(Variable {
+                        name: "x".to_string(),
+                        line_number: 7
+                    }),
+                    2
+                )
             ])
         );
     }

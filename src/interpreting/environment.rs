@@ -21,6 +21,12 @@ pub trait Environment: Debug + EnvironmentClone {
     fn pop(&mut self);
     fn define(&mut self, name: String, value: Value);
     fn assign(&mut self, name: String, value: Value) -> Result<(), RuntimeErrorOrReturnValue>;
+    fn assign_at(
+        &mut self,
+        name: String,
+        value: Value,
+        distance: &usize,
+    ) -> Result<(), RuntimeErrorOrReturnValue>;
     fn get(&self, name: &str) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue>;
     fn get_at(
         &self,
@@ -121,6 +127,27 @@ impl Environment for RefCellEnvironment {
         }
     }
 
+    fn assign_at(
+        &mut self,
+        name: String,
+        value: Value,
+        distance: &usize,
+    ) -> Result<(), RuntimeErrorOrReturnValue> {
+        let values = self
+            .values
+            .get(*distance)
+            .ok_or::<RuntimeErrorOrReturnValue>(
+                RuntimeError {
+                    message: "Location in stack not found.".to_string(),
+                }
+                .into(),
+            )?;
+        values
+            .borrow_mut()
+            .insert(name, Rc::new(RefCell::new(value)));
+        Ok(())
+    }
+
     fn get(&self, name: &str) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
         for values in self.values.iter().rev() {
             if let Some(v) = values.borrow().get(name) {
@@ -186,6 +213,7 @@ pub struct SingleCopyEnvironment {
 }
 
 impl SingleCopyEnvironment {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             values: vec![construct_global_values()],
@@ -230,6 +258,25 @@ impl Environment for SingleCopyEnvironment {
             self.pos = pos;
             Ok(())
         }
+    }
+
+    fn assign_at(
+        &mut self,
+        name: String,
+        value: Value,
+        distance: &usize,
+    ) -> Result<(), RuntimeErrorOrReturnValue> {
+        let values = self
+            .values
+            .get_mut(*distance)
+            .ok_or::<RuntimeErrorOrReturnValue>(
+                RuntimeError {
+                    message: "Location in stack not found.".to_string(),
+                }
+                .into(),
+            )?;
+        values.insert(name, Rc::new(RefCell::new(value)));
+        Ok(())
     }
 
     fn get(&self, name: &str) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {

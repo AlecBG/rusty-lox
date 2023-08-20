@@ -14,6 +14,7 @@ use super::LogicalOperator;
 use super::ParserError;
 use super::ParserErrors;
 use super::ReturnStatement;
+use super::Variable;
 use super::VariableDeclaration;
 use super::WhileStatement;
 
@@ -73,7 +74,14 @@ impl Parser {
     }
 
     fn parse_class_declaration(&mut self) -> Result<ClassStatement, ParserError> {
+        let line_number = self.peek().line;
         let name = self.consume_identifier("Expect function name")?;
+        let superclass = if self.matches(&[TokenType::Less]) {
+            let sc = self.consume_identifier("Expect superclass name.")?;
+            Some(sc)
+        } else {
+            None
+        };
         self.consume(TokenType::LeftBrace, "Expect '{' after class name")?;
         let mut methods: Vec<FunctionStatement> = vec![];
         while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
@@ -82,7 +90,12 @@ impl Parser {
 
         self.consume(TokenType::RightBrace, "Expect '}' after class body")?;
 
-        Ok(ClassStatement { name, methods })
+        Ok(ClassStatement {
+            name,
+            line_number,
+            methods,
+            superclass,
+        })
     }
 
     fn parse_function_declaration(
@@ -350,8 +363,8 @@ impl Parser {
 
         let value = Box::new(self.parse_assignment()?);
         match expression {
-            Expr::Variable(name) => Ok(Expr::Assign {
-                name,
+            Expr::Variable(variable) => Ok(Expr::Assign {
+                variable,
                 expression: value,
             }),
             Expr::Get { object, name } => Ok(Expr::Set {
@@ -582,7 +595,9 @@ impl Parser {
             TokenType::False => Expr::Boolean(false),
             TokenType::True => Expr::Boolean(true),
             TokenType::Nil => Expr::Nil,
-            TokenType::This => Expr::This(self.peek().clone()),
+            TokenType::This => Expr::This {
+                line_number: self.peek().line,
+            },
             TokenType::Number(x) => Expr::Number(x),
             TokenType::String(x) => Expr::String(x),
             TokenType::LeftParen => {
@@ -596,7 +611,22 @@ impl Parser {
                     e => return e,
                 }
             }
-            TokenType::Identifier(var_name) => Expr::Variable(var_name),
+            TokenType::Super => {
+                let line_number = self.peek().line;
+                self.advance();
+                self.consume(TokenType::Dot, "Expect '.' after 'super'.")?;
+                let method = self.consume_identifier("Expect superclass method name.")?;
+                // Hack to handle the fact that we run self.advance at the end
+                self.current -= 1;
+                Expr::Super {
+                    line_number,
+                    method,
+                }
+            }
+            TokenType::Identifier(name) => Expr::Variable(Variable {
+                name,
+                line_number: self.peek().line,
+            }),
             unexpected_type => {
                 return Err(Parser::error(
                     self.peek(),

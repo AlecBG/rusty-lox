@@ -1,6 +1,6 @@
 use crate::parsing::{
     BinaryOperator, Expr, IfStatement, LogicalOperator, ResolvableExpr, SaveExpression, Stmt,
-    UnaryOperator, VariableDeclaration, WhileStatement,
+    UnaryOperator, Variable, VariableDeclaration, WhileStatement,
 };
 use crate::scanning::Token;
 use std::cell::RefCell;
@@ -13,17 +13,16 @@ use super::functions::{LoxCallable, LoxFunction};
 use super::runtime_errors::{RuntimeError, RuntimeErrorOrReturnValue};
 use super::values::Value;
 
+pub type Locals = Rc<HashMap<ResolvableExpr, usize>>;
+
 pub struct Interpreter {
     environment: Box<dyn Environment>,
-    locals: HashMap<ResolvableExpr, usize>,
+    locals: Locals,
     with_resolver: bool,
 }
 
 impl Interpreter {
-    pub fn new(
-        mut environment: Box<dyn Environment>,
-        locals: HashMap<ResolvableExpr, usize>,
-    ) -> Self {
+    pub fn new(mut environment: Box<dyn Environment>, locals: Locals) -> Self {
         environment.push();
         Self {
             environment,
@@ -36,7 +35,7 @@ impl Interpreter {
         environment.push();
         Self {
             environment,
-            locals: HashMap::new(),
+            locals: Rc::new(HashMap::new()),
             with_resolver: false,
         }
     }
@@ -61,18 +60,51 @@ impl Interpreter {
                 Ok(())
             }
             Stmt::Class(class_statement) => {
+                let superclass: Option<Box<LoxClass>> = match class_statement.superclass {
+                    Some(n) => {
+                        let sc = self.evaluate(Expr::Variable(Variable {
+                            name: n.clone(),
+                            line_number: class_statement.line_number,
+                        }))?;
+                        let s = &*sc.borrow();
+                        match s {
+                            Value::Class(c) => Some(Box::new(c.clone())),
+                            _ => {
+                                return Err(RuntimeError {
+                                    message: format!(
+                                        "Superclass '{n}' must be a class, found {}.",
+                                        s.get_type()
+                                    ),
+                                }
+                                .into())
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                let class_methods_environment = match &superclass {
+                    Some(sc) => {
+                        let mut e = self.environment.clone();
+                        e.push();
+                        e.define("super".to_string(), Value::Class(*sc.clone()));
+                        e
+                    }
+                    None => self.environment.clone(),
+                };
+
                 let class_name = class_statement.name.clone();
                 let methods: HashMap<String, LoxFunction> = class_statement
                     .methods
                     .into_iter()
                     .map(|m| {
-                        let mut environment = self.environment.clone();
+                        let mut environment = class_methods_environment.clone();
                         environment.push();
                         (
                             m.clone().name,
                             LoxFunction {
                                 function: m,
                                 environment,
+                                locals: self.locals.clone(),
                                 with_resolver: self.with_resolver,
                                 is_initializer: false,
                             },
@@ -82,7 +114,9 @@ impl Interpreter {
 
                 let lox_class = LoxClass {
                     name: class_name.clone(),
+                    locals: self.locals.clone(),
                     methods,
+                    superclass,
                 };
                 self.environment.define(class_name, Value::Class(lox_class));
                 Ok(())
@@ -93,6 +127,7 @@ impl Interpreter {
                 let lox_function = LoxFunction {
                     function,
                     environment,
+                    locals: self.locals.clone(),
                     with_resolver: self.with_resolver,
                     is_initializer: false,
                 };
@@ -176,9 +211,18 @@ impl Interpreter {
         expression: Expr,
     ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
         match expression {
-            Expr::Assign { name, expression } => {
+            Expr::Assign {
+                variable,
+                expression,
+            } => {
                 let value = self.evaluate(*expression)?;
-                self.environment.assign(name, value.borrow().clone())?;
+                let resolvable_expr = &ResolvableExpr::Variable(variable);
+                let distance = &self.get_depth(resolvable_expr);
+                self.environment.assign_at(
+                    resolvable_expr.to_string(),
+                    value.borrow().clone(),
+                    distance,
+                )?;
                 Ok(value)
             }
             Expr::Binary {
@@ -230,43 +274,85 @@ impl Interpreter {
                 operator,
                 expression,
             } => self.evaluate_unary_expression(*expression, operator),
-            Expr::Grouping(expression) => self.evaluate(*expression),
-            Expr::This(_) => {
-                if self.with_resolver {
-                    let resolvable_expr = ResolvableExpr::Variable("this".to_string());
-                    self.lookup_variable(resolvable_expr)
-                } else {
-                    self.environment.get("this")
+            Expr::Super {
+                method,
+                line_number,
+            } => {
+                // The following code is pretty gross, the methodology is copied from the book and
+                // I don't think it's worth the effort to tidy it up.
+                if self.locals.is_empty() {
+                    return Err(RuntimeErrorOrReturnValue::RuntimeError(RuntimeError {
+                        message: "Currently cannot handle super without the resolver!".to_string(),
+                    }));
+                }
+
+                let distance = self.get_depth(&ResolvableExpr::Super { line_number });
+
+                let super_value = self.environment.get_at(&distance, "super")?;
+                let sv = &*super_value.borrow();
+                match sv {
+                    Value::Class(superclass) => {
+                        let instance_ptr = self.environment.get_at(&(distance + 1), "this")?;
+                        let i_v = &*instance_ptr.borrow();
+                        let instance = match i_v {
+                            Value::Instance(i) => Ok(i),
+                            _ => Err(RuntimeErrorOrReturnValue::RuntimeError(RuntimeError {
+                                message: "'this' did not return an instance.".to_string(),
+                            })),
+                        }?;
+                        let method = match superclass.find_method(&method) {
+                            Some(f) => Ok(f),
+                            None => Err(RuntimeErrorOrReturnValue::RuntimeError(RuntimeError {
+                                message: format!("Undefined property '{}'.", method),
+                            })),
+                        }?;
+                        Ok(Rc::new(RefCell::new(Value::Function(
+                            method.bind(instance.clone(), false),
+                        ))))
+                    }
+                    _ => {
+                        return Err(RuntimeErrorOrReturnValue::RuntimeError(RuntimeError {
+                            message: "Super lookup was not a class".to_string(),
+                        }))
+                    }
                 }
             }
+            Expr::Grouping(expression) => self.evaluate(*expression),
+            Expr::This { line_number } => self.get_variable(&ResolvableExpr::This { line_number }),
             Expr::Number(x) => Ok(Rc::new(RefCell::new(Value::Number(x)))),
             Expr::String(x) => Ok(Rc::new(RefCell::new(Value::String(x)))),
             Expr::Boolean(x) => Ok(Rc::new(RefCell::new(Value::Boolean(x)))),
             Expr::Nil => Ok(Rc::new(RefCell::new(Value::Nil))),
-            Expr::Variable(name) => {
-                if self.with_resolver {
-                    let resolvable_expr = ResolvableExpr::Variable(name);
-                    self.lookup_variable(resolvable_expr)
-                } else {
-                    self.environment.get(&name)
-                }
-            }
+            Expr::Variable(variable) => self.get_variable(&ResolvableExpr::Variable(variable)),
+        }
+    }
+
+    /// This is the method to call to look up a variable.
+    /// It handles whether we are using a resolver or not.
+    fn get_variable(
+        &mut self,
+        resolvable_expr: &ResolvableExpr,
+    ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
+        if self.with_resolver {
+            self.lookup_variable(resolvable_expr)
+        } else {
+            self.environment.get(&resolvable_expr.to_string())
+        }
+    }
+
+    fn get_depth(&self, resolvable_expr: &ResolvableExpr) -> usize {
+        match self.locals.get(resolvable_expr) {
+            Some(d) => d + 1,
+            None => 0,
         }
     }
 
     fn lookup_variable(
         &mut self,
-        expr: ResolvableExpr,
+        expr: &ResolvableExpr,
     ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
-        if let Some(distance) = self.locals.get(&expr) {
-            match expr {
-                ResolvableExpr::Variable(name) => self.environment.get_at(&(distance + 1), &name),
-            }
-        } else {
-            match expr {
-                ResolvableExpr::Variable(name) => self.environment.get_at(&0, &name),
-            }
-        }
+        self.environment
+            .get_at(&self.get_depth(expr), &expr.to_string())
     }
 
     fn evaluate_binary_expression(
@@ -457,7 +543,10 @@ impl Interpreter {
             Value::NativeFunction(callable) => callable.call(args),
             Value::Class(callable) => callable.call(args),
             _ => Err(RuntimeError {
-                message: format!("Can only call functions and classes at {paren:?}"),
+                message: format!(
+                    "Can only call functions and classes at {paren:?}, got {}",
+                    c_v.get_type()
+                ),
             }
             .into()),
         }?;
@@ -527,7 +616,7 @@ mod tests {
         },
         parsing::{
             BinaryOperator, BlockStatement, Expr, FunctionStatement, IfStatement, ReturnStatement,
-            SaveExpression, Stmt, VariableDeclaration,
+            SaveExpression, Stmt, Variable, VariableDeclaration,
         },
         scanning::{Token, TokenType},
     };
@@ -543,7 +632,10 @@ mod tests {
                 initializer: Expr::Number(0.0),
             }),
             Stmt::Test(SaveExpression {
-                value_to_save: Expr::Variable("x".to_string()),
+                value_to_save: Expr::Variable(Variable {
+                    name: "x".to_string(),
+                    line_number: 1,
+                }),
                 values: saved_values.clone(),
             }),
         ]));
@@ -582,7 +674,10 @@ mod tests {
             Stmt::Var(VariableDeclaration {
                 name: "x".to_string(),
                 initializer: Expr::Call {
-                    callee: Box::new(Expr::Variable("f".to_string())),
+                    callee: Box::new(Expr::Variable(Variable {
+                        name: "f".to_string(),
+                        line_number: 4,
+                    })),
                     paren: Token {
                         token_type: TokenType::LeftParen,
                         line: 4,
@@ -591,7 +686,10 @@ mod tests {
                 },
             }),
             Stmt::Test(SaveExpression {
-                value_to_save: Expr::Variable("x".to_string()),
+                value_to_save: Expr::Variable(Variable {
+                    name: "x".to_string(),
+                    line_number: 5,
+                }),
                 values: saved_values.clone(),
             }),
         ]));
@@ -624,27 +722,35 @@ mod tests {
             name: "f".to_string(),
             params: vec!["i".to_string()],
             body: vec![
-                // Stmt::Var(VariableDeclaration {
-                //     name: "numCalls".to_string(),
-                //     initializer: Expr::Number(0.0),
-                // }),
                 Stmt::Expression(Expr::Assign {
-                    name: "numCalls".to_string(),
+                    variable: Variable {
+                        name: "numCalls".to_string(),
+                        line_number: 1,
+                    },
                     expression: Box::new(Expr::Binary {
-                        left: Box::new(Expr::Variable("numCalls".to_string())),
+                        left: Box::new(Expr::Variable(Variable {
+                            name: "numCalls".to_string(),
+                            line_number: 3,
+                        })),
                         operator: BinaryOperator::Plus,
                         right: Box::new(Expr::Number(1.0)),
                     }),
                 }),
                 Stmt::If(IfStatement {
                     condition: Expr::Binary {
-                        left: Box::new(Expr::Variable("i".to_string())),
+                        left: Box::new(Expr::Variable(Variable {
+                            name: "i".to_string(),
+                            line_number: 4,
+                        })),
                         operator: BinaryOperator::LessEqual,
                         right: Box::new(Expr::Number(0.0)),
                     },
                     then_stmt: Box::new(Stmt::Block(BlockStatement(vec![
                         Stmt::Test(SaveExpression {
-                            value_to_save: Expr::Variable("numCalls".to_string()),
+                            value_to_save: Expr::Variable(Variable {
+                                name: "numCalls".to_string(),
+                                line_number: 5,
+                            }),
                             values: saved_values.clone(),
                         }),
                         Stmt::Return(ReturnStatement {
@@ -658,13 +764,19 @@ mod tests {
                     else_stmt: None,
                 }),
                 Stmt::Expression(Expr::Call {
-                    callee: Box::new(Expr::Variable("f".to_string())),
+                    callee: Box::new(Expr::Variable(Variable {
+                        name: "f".to_string(),
+                        line_number: 8,
+                    })),
                     paren: Token {
                         token_type: TokenType::LeftParen,
                         line: 4,
                     },
                     arguments: vec![Expr::Binary {
-                        left: Box::new(Expr::Variable("i".to_string())),
+                        left: Box::new(Expr::Variable(Variable {
+                            name: "i".to_string(),
+                            line_number: 10,
+                        })),
                         operator: BinaryOperator::Minus,
                         right: Box::new(Expr::Number(1.0)),
                     }],
@@ -678,7 +790,10 @@ mod tests {
             }),
             func_def,
             Stmt::Expression(Expr::Call {
-                callee: Box::new(Expr::Variable("f".to_string())),
+                callee: Box::new(Expr::Variable(Variable {
+                    name: "f".to_string(),
+                    line_number: 10,
+                })),
                 paren: Token {
                     token_type: TokenType::LeftParen,
                     line: 6,
@@ -721,15 +836,24 @@ mod tests {
             params: vec![],
             body: vec![
                 Stmt::Expression(Expr::Assign {
-                    name: "x".to_string(),
+                    variable: Variable {
+                        name: "x".to_string(),
+                        line_number: 4,
+                    },
                     expression: Box::new(Expr::Binary {
-                        left: Box::new(Expr::Variable("x".to_string())),
+                        left: Box::new(Expr::Variable(Variable {
+                            name: "x".to_string(),
+                            line_number: 4,
+                        })),
                         operator: BinaryOperator::Plus,
                         right: Box::new(Expr::Number(1.0)),
                     }),
                 }),
                 Stmt::Test(SaveExpression {
-                    value_to_save: Expr::Variable("x".to_string()),
+                    value_to_save: Expr::Variable(Variable {
+                        name: "x".to_string(),
+                        line_number: 5,
+                    }),
                     values: saved_values.clone(),
                 }),
             ],
@@ -753,7 +877,10 @@ mod tests {
                         token_type: TokenType::Return,
                         line: 3,
                     },
-                    value: Expr::Variable("inner".to_string()),
+                    value: Expr::Variable(Variable {
+                        name: "inner".to_string(),
+                        line_number: 2,
+                    }),
                 }),
             ],
         });
@@ -767,7 +894,10 @@ mod tests {
             Stmt::Var(VariableDeclaration {
                 name: "f".to_string(),
                 initializer: Expr::Call {
-                    callee: Box::new(Expr::Variable("outer".to_string())),
+                    callee: Box::new(Expr::Variable(Variable {
+                        name: "outer".to_string(),
+                        line_number: 8,
+                    })),
                     paren: Token {
                         token_type: TokenType::LeftParen,
                         line: 4,
@@ -776,7 +906,10 @@ mod tests {
                 },
             }),
             Stmt::Expression(Expr::Call {
-                callee: Box::new(Expr::Variable("f".to_string())),
+                callee: Box::new(Expr::Variable(Variable {
+                    name: "f".to_string(),
+                    line_number: 9,
+                })),
                 paren: Token {
                     token_type: TokenType::LeftParen,
                     line: 5,
@@ -784,7 +917,10 @@ mod tests {
                 arguments: vec![],
             }),
             Stmt::Expression(Expr::Call {
-                callee: Box::new(Expr::Variable("f".to_string())),
+                callee: Box::new(Expr::Variable(Variable {
+                    name: "f".to_string(),
+                    line_number: 10,
+                })),
                 paren: Token {
                     token_type: TokenType::LeftParen,
                     line: 5,
@@ -829,7 +965,10 @@ mod tests {
     fn test_native_clock() {
         // clock();
         let program = Stmt::Block(BlockStatement(vec![Stmt::Expression(Expr::Call {
-            callee: Box::new(Expr::Variable("clock".to_string())),
+            callee: Box::new(Expr::Variable(Variable {
+                name: "clock".to_string(),
+                line_number: 1,
+            })),
             paren: Token {
                 token_type: TokenType::LeftParen,
                 line: 5,
@@ -867,7 +1006,10 @@ mod tests {
                 name: "a".to_string(),
                 initializer: Expr::Number(1.0),
             })])),
-            Stmt::Print(Expr::Variable("a".to_string())),
+            Stmt::Print(Expr::Variable(Variable {
+                name: "a".to_string(),
+                line_number: 2,
+            })),
         ]));
         let environment = Box::new(RefCellEnvironment::new());
         let mut interpreter = Interpreter::new_without_resolver(environment);

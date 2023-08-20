@@ -4,13 +4,28 @@ use super::{
     functions::{LoxCallable, LoxFunction},
     runtime_errors::RuntimeErrorOrReturnValue,
     values::Value,
-    RuntimeError,
+    Locals, RuntimeError,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoxClass {
     pub name: String,
+    pub locals: Locals,
     pub methods: HashMap<String, LoxFunction>,
+    pub superclass: Option<Box<LoxClass>>,
+}
+
+impl LoxClass {
+    pub fn find_method(&self, name: &str) -> Option<LoxFunction> {
+        if let Some(method) = self.methods.get(name) {
+            return Some(method.clone());
+        }
+        if let Some(superclass) = &self.superclass {
+            superclass.find_method(name)
+        } else {
+            None
+        }
+    }
 }
 
 impl Display for LoxClass {
@@ -25,8 +40,8 @@ impl LoxCallable for LoxClass {
         arguments: Vec<Value>,
     ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
         let instance = LoxInstance::new(self.clone());
-        if let Some(initializer) = instance.find_method("init") {
-            initializer.bind(instance.clone()).call(arguments)?;
+        if let Some(initializer) = instance.class.find_method("init") {
+            initializer.bind(instance.clone(), true).call(arguments)?;
         }
         Ok(Rc::new(RefCell::new(Value::Instance(instance))))
     }
@@ -50,10 +65,11 @@ impl LoxInstance {
         if let Some(v) = self.fields.borrow().get(name) {
             return Ok(v.clone());
         }
-        if let Some(f) = self.find_method(name) {
+        if let Some(f) = self.class.find_method(name) {
             // Note has the same state as self!
             let instance_to_bind = self.clone();
-            let bound_f = f.bind(instance_to_bind);
+            let is_initializer = name == "init";
+            let bound_f = f.bind(instance_to_bind, is_initializer);
             return Ok(Rc::new(RefCell::new(Value::Function(bound_f))));
         }
         Err(RuntimeError {
@@ -63,10 +79,6 @@ impl LoxInstance {
 
     pub fn set(&mut self, name: String, value: Rc<RefCell<Value>>) {
         self.fields.borrow_mut().insert(name, value);
-    }
-
-    fn find_method(&self, name: &str) -> Option<LoxFunction> {
-        self.class.methods.get(name).cloned()
     }
 }
 

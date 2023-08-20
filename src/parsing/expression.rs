@@ -71,10 +71,16 @@ impl TryFrom<TokenType> for UnaryOperator {
     }
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct Variable {
+    pub name: String,
+    pub line_number: usize,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     Assign {
-        name: String,
+        variable: Variable,
         expression: Box<Expr>,
     },
     Binary {
@@ -105,7 +111,13 @@ pub enum Expr {
         operator: UnaryOperator,
         expression: Box<Expr>,
     },
-    This(Token),
+    Super {
+        method: String,
+        line_number: usize,
+    },
+    This {
+        line_number: usize,
+    },
     Grouping(Box<Expr>),
     // Literals
     Number(f64),
@@ -113,5 +125,5 @@ pub enum Expr {
     Boolean(bool),
     Nil,
 
-    Variable(String),
+    Variable(Variable),
 }

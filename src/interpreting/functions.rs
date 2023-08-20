@@ -12,7 +12,7 @@ use super::{
     environment::Environment,
     runtime_errors::{RuntimeError, RuntimeErrorOrReturnValue},
     values::{Value, ValueType},
-    Interpreter,
+    Interpreter, Locals,
 };
 
 pub trait LoxCallable {
@@ -71,19 +71,22 @@ impl LoxCallable for NativeFunction {
 pub struct LoxFunction {
     pub function: FunctionStatement,
     pub environment: Box<dyn Environment>,
+    pub locals: Locals,
     pub with_resolver: bool,
     pub is_initializer: bool,
 }
 
 impl LoxFunction {
-    pub fn bind(&self, instance: LoxInstance) -> Self {
+    pub fn bind(&self, instance: LoxInstance, is_initializer: bool) -> Self {
         let mut environment = self.environment.clone();
+        let locals = instance.class.locals.clone();
         environment.define("this".to_string(), Value::Instance(instance));
         Self {
             function: self.function.clone(),
             environment,
+            locals,
             with_resolver: self.with_resolver,
-            is_initializer: true,
+            is_initializer,
         }
     }
 }
@@ -110,8 +113,11 @@ impl LoxCallable for LoxFunction {
         for (arg, param) in arguments.into_iter().zip(self.function.params.iter()) {
             self.environment.define(param.clone(), arg);
         }
-        let mut interpreter: Interpreter =
-            Interpreter::new_without_resolver(self.environment.clone());
+        let mut interpreter: Interpreter = if self.with_resolver {
+            Interpreter::new(self.environment.clone(), self.locals.clone())
+        } else {
+            Interpreter::new_without_resolver(self.environment.clone())
+        };
 
         for stmt in &self.function.body {
             match interpreter.execute(stmt.clone()) {
