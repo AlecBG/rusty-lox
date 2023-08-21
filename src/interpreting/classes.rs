@@ -35,10 +35,7 @@ impl Display for LoxClass {
 }
 
 impl LoxCallable for LoxClass {
-    fn call(
-        &mut self,
-        arguments: Vec<Value>,
-    ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
+    fn call(&self, arguments: Vec<Value>) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
         let instance = LoxInstance::new(self.clone());
         if let Some(initializer) = instance.class.find_method("init") {
             initializer.bind(instance.clone(), true).call(arguments)?;

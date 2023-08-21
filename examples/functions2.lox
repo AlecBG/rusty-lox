@@ -1,0 +1,8 @@
+fun f() {
+    var x = 1;
+    {
+        return x;  // Still returns fine despite being in a nested scope.
+    }
+}
+
+print f();

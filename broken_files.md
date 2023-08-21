@@ -1,2 +1,0 @@
-- functions_closures.lox and classes4.lox - broken because function depth in resolution is not the same as the environment
-- functions_recursive.lox and functions.lox - broken because recursion doesn't work

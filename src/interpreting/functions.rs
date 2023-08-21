@@ -9,17 +9,14 @@ use crate::parsing::FunctionStatement;
 
 use super::{
     classes::LoxInstance,
-    environment::Environment,
+    environment::{ClosureEnvironment, Environment},
     runtime_errors::{RuntimeError, RuntimeErrorOrReturnValue},
     values::{Value, ValueType},
     Interpreter, Locals,
 };
 
 pub trait LoxCallable {
-    fn call(
-        &mut self,
-        arguments: Vec<Value>,
-    ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue>;
+    fn call(&self, arguments: Vec<Value>) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue>;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -44,10 +41,7 @@ impl Display for NativeFunction {
 }
 
 impl LoxCallable for NativeFunction {
-    fn call(
-        &mut self,
-        arguments: Vec<Value>,
-    ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
+    fn call(&self, arguments: Vec<Value>) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
         match self {
             Self::Clock => {
                 if !arguments.is_empty() {
@@ -92,10 +86,7 @@ impl LoxFunction {
 }
 
 impl LoxCallable for LoxFunction {
-    fn call(
-        &mut self,
-        arguments: Vec<Value>,
-    ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
+    fn call(&self, arguments: Vec<Value>) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
         if arguments.len() != self.function.params.len() {
             return Err(RuntimeError {
                 message: format!(
@@ -107,16 +98,15 @@ impl LoxCallable for LoxFunction {
             }
             .into());
         }
-        self.environment.push();
-        self.environment
-            .define(self.function.name.clone(), Value::Function(self.clone()));
+        let mut environment = Box::new(ClosureEnvironment::new(self.environment.clone()));
+        environment.push();
         for (arg, param) in arguments.into_iter().zip(self.function.params.iter()) {
-            self.environment.define(param.clone(), arg);
+            environment.define(param.clone(), arg);
         }
         let mut interpreter: Interpreter = if self.with_resolver {
-            Interpreter::new(self.environment.clone(), self.locals.clone())
+            Interpreter::new(environment, self.locals.clone())
         } else {
-            Interpreter::new_without_resolver(self.environment.clone())
+            Interpreter::new_without_resolver(environment)
         };
 
         for stmt in &self.function.body {
@@ -124,11 +114,9 @@ impl LoxCallable for LoxFunction {
                 Ok(_) => {}
                 Err(err) => match err {
                     RuntimeErrorOrReturnValue::RuntimeError(e) => {
-                        self.environment.pop();
                         return Err(RuntimeErrorOrReturnValue::RuntimeError(e));
                     }
                     RuntimeErrorOrReturnValue::ReturnValue(v) => {
-                        self.environment.pop();
                         if self.is_initializer {
                             return self
                                 .environment
@@ -139,7 +127,6 @@ impl LoxCallable for LoxFunction {
                 },
             };
         }
-        self.environment.pop();
         if self.is_initializer {
             self.environment
                 .get_at(&(self.environment.get_depth() - 1), "this")

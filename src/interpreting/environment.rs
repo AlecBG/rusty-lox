@@ -20,9 +20,9 @@ pub trait Environment: Debug + EnvironmentClone {
     fn push(&mut self);
     fn pop(&mut self);
     fn define(&mut self, name: String, value: Value);
-    fn assign(&mut self, name: String, value: Value) -> Result<(), RuntimeErrorOrReturnValue>;
+    fn assign(&self, name: String, value: Value) -> Result<(), RuntimeErrorOrReturnValue>;
     fn assign_at(
-        &mut self,
+        &self,
         name: String,
         value: Value,
         distance: &usize,
@@ -80,10 +80,12 @@ pub struct RefCellEnvironment {
 
 impl RefCellEnvironment {
     pub fn new() -> Self {
-        Self {
+        let mut env = Self {
             values: vec![Rc::new(RefCell::new(construct_global_values()))],
             pos: 0,
-        }
+        };
+        env.push();
+        env
     }
 }
 
@@ -108,29 +110,27 @@ impl Environment for RefCellEnvironment {
             .insert(name, Rc::new(RefCell::new(value)));
     }
 
-    fn assign(&mut self, name: String, value: Value) -> Result<(), RuntimeErrorOrReturnValue> {
-        let pos = self.pos;
-        if self.values[self.pos].borrow().contains_key(&name) {
-            self.values[self.pos]
-                .borrow_mut()
-                .insert(name, Rc::new(RefCell::new(value)));
-            Ok(())
-        } else {
-            if self.pos == 0 {
-                return Err(RuntimeError {
-                    message: format!("Undefined variable '{name}'."),
+    fn assign(&self, name: String, value: Value) -> Result<(), RuntimeErrorOrReturnValue> {
+        let mut pos = self.pos;
+        loop {
+            match self.assign_at(name.clone(), value.clone(), &pos) {
+                Ok(()) => return Ok(()),
+                Err(_) => {
+                    if pos == 0 {
+                        break;
+                    }
+                    pos -= 1;
                 }
-                .into());
-            }
-            self.pos -= 1;
-            self.assign(name, value)?;
-            self.pos = pos;
-            Ok(())
+            };
         }
+        Err(RuntimeError {
+            message: format!("Undefined variable '{name}'."),
+        }
+        .into())
     }
 
     fn assign_at(
-        &mut self,
+        &self,
         name: String,
         value: Value,
         distance: &usize,
@@ -144,10 +144,17 @@ impl Environment for RefCellEnvironment {
                 }
                 .into(),
             )?;
-        values
-            .borrow_mut()
-            .insert(name, Rc::new(RefCell::new(value)));
-        Ok(())
+        if values.borrow().contains_key(&name) {
+            values
+                .borrow_mut()
+                .insert(name, Rc::new(RefCell::new(value)));
+            Ok(())
+        } else {
+            return Err(RuntimeError {
+                message: format!("Undefined variable '{name}'."),
+            }
+            .into());
+        }
     }
 
     fn get(&self, name: &str) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
@@ -206,96 +213,59 @@ impl Default for RefCellEnvironment {
     }
 }
 
-/// In this environment one does not have persistent state in closures.
-/// The environment of a function is a frozen copy of what the environment was
-/// when the function was defined. For example
-/// ```
-/// var x = 1;
-/// fun f() {
-///     print x;
-/// }
-/// x = x + 1;
-/// f();
-/// ```
-/// This code will print 1.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SingleCopyEnvironment {
-    values: Vec<HashMap<String, Rc<RefCell<Value>>>>,
+#[derive(Clone, Debug)]
+pub struct ClosureEnvironment {
+    enclosed_environment: Box<dyn Environment>,
+    enclosed_environment_depth: usize,
+    values: Vec<Rc<RefCell<HashMap<String, Rc<RefCell<Value>>>>>>,
     pos: usize,
 }
 
-impl SingleCopyEnvironment {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
+impl ClosureEnvironment {
+    pub fn new(enclosed_environment: Box<dyn Environment>) -> Self {
+        let depth = enclosed_environment.get_depth();
         Self {
-            values: vec![construct_global_values()],
-            pos: 0,
+            enclosed_environment,
+            enclosed_environment_depth: depth,
+            values: vec![],
+            pos: depth - 1,
         }
     }
 }
 
-impl Environment for SingleCopyEnvironment {
+impl Environment for ClosureEnvironment {
     fn push(&mut self) {
-        self.values.push(HashMap::new());
+        self.values.push(Rc::new(RefCell::new(HashMap::new())));
         self.pos += 1;
     }
 
     fn pop(&mut self) {
         self.pos = self.values.len() - 1;
-        if self.pos == 0 {
-            return;
+        if self.pos == self.enclosed_environment_depth {
+            panic!("Tried to pop a closure environment into its enclosed environment!");
         }
         self.values.pop();
         self.pos -= 1;
     }
 
     fn define(&mut self, name: String, value: Value) {
-        self.values[self.pos].insert(name, Rc::new(RefCell::new(value)));
+        self.values[self.pos - self.enclosed_environment_depth]
+            .borrow_mut()
+            .insert(name, Rc::new(RefCell::new(value)));
     }
 
-    fn assign(&mut self, name: String, value: Value) -> Result<(), RuntimeErrorOrReturnValue> {
-        let pos = self.pos;
-        if let Entry::Occupied(mut e) = self.values[self.pos].entry(name.clone()) {
-            e.insert(Rc::new(RefCell::new(value)));
-            Ok(())
-        } else {
-            if self.pos == 0 {
-                return Err(RuntimeError {
-                    message: format!("Undefined variable '{name}'."),
+    fn assign(&self, name: String, value: Value) -> Result<(), RuntimeErrorOrReturnValue> {
+        let mut pos = self.pos;
+        loop {
+            match self.assign_at(name.clone(), value.clone(), &pos) {
+                Ok(()) => return Ok(()),
+                Err(_) => {
+                    if pos == 0 {
+                        break;
+                    }
+                    pos -= 1;
                 }
-                .into());
-            }
-            self.pos -= 1;
-            self.assign(name, value)?;
-            self.pos = pos;
-            Ok(())
-        }
-    }
-
-    fn assign_at(
-        &mut self,
-        name: String,
-        value: Value,
-        distance: &usize,
-    ) -> Result<(), RuntimeErrorOrReturnValue> {
-        let values = self
-            .values
-            .get_mut(*distance)
-            .ok_or::<RuntimeErrorOrReturnValue>(
-                RuntimeError {
-                    message: "Location in stack not found.".to_string(),
-                }
-                .into(),
-            )?;
-        values.insert(name, Rc::new(RefCell::new(value)));
-        Ok(())
-    }
-
-    fn get(&self, name: &str) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
-        for values in self.values.iter().rev() {
-            if let Some(v) = values.get(name) {
-                return Ok(v.clone());
-            }
+            };
         }
         Err(RuntimeError {
             message: format!("Undefined variable '{name}'."),
@@ -303,21 +273,60 @@ impl Environment for SingleCopyEnvironment {
         .into())
     }
 
+    fn assign_at(
+        &self,
+        name: String,
+        value: Value,
+        distance: &usize,
+    ) -> Result<(), RuntimeErrorOrReturnValue> {
+        if distance < &self.enclosed_environment_depth {
+            return self.enclosed_environment.assign_at(name, value, distance);
+        }
+        let d = distance - self.enclosed_environment_depth;
+        let values = self.values.get(d).ok_or::<RuntimeErrorOrReturnValue>(
+            RuntimeError {
+                message: "Location in stack not found.".to_string(),
+            }
+            .into(),
+        )?;
+        if values.borrow().contains_key(&name) {
+            values
+                .borrow_mut()
+                .insert(name, Rc::new(RefCell::new(value)));
+            Ok(())
+        } else {
+            return Err(RuntimeError {
+                message: format!("Undefined variable '{name}'."),
+            }
+            .into());
+        }
+    }
+
+    fn get(&self, name: &str) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
+        for values in self.values.iter().rev() {
+            if let Some(v) = values.borrow().get(name) {
+                return Ok(v.clone());
+            }
+        }
+        self.enclosed_environment.get(name)
+    }
+
     fn get_at(
         &self,
         distance: &usize,
         name: &str,
     ) -> Result<Rc<RefCell<Value>>, RuntimeErrorOrReturnValue> {
-        let values = self
-            .values
-            .get(*distance)
-            .ok_or::<RuntimeErrorOrReturnValue>(
-                RuntimeError {
-                    message: "Location in stack not found.".to_string(),
-                }
-                .into(),
-            )?;
-        if let Some(v) = values.get(name) {
+        if distance < &self.enclosed_environment_depth {
+            return self.enclosed_environment.get_at(distance, name);
+        }
+        let d = distance - self.enclosed_environment_depth;
+        let values = self.values.get(d).ok_or::<RuntimeErrorOrReturnValue>(
+            RuntimeError {
+                message: "Location in stack not found.".to_string(),
+            }
+            .into(),
+        )?;
+        if let Some(v) = values.borrow().get(name) {
             return Ok(v.clone());
         }
         Err(RuntimeError {
@@ -327,12 +336,15 @@ impl Environment for SingleCopyEnvironment {
     }
 
     fn get_depth(&self) -> usize {
-        self.values.len()
+        self.values.len() + self.enclosed_environment_depth
     }
 
     fn debug(&self) {
-        for (i, vals) in self.values.iter().enumerate() {
-            println!("Depth {i}");
+        self.enclosed_environment.debug();
+        println!("----");
+        for (i, vals_ptr) in self.values.iter().enumerate() {
+            println!("Depth {}", i + self.enclosed_environment_depth);
+            let vals = &*vals_ptr.borrow();
             for (k, v) in vals {
                 println!("{k}: {}", v.borrow().get_type());
             }

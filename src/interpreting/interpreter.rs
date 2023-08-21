@@ -22,8 +22,7 @@ pub struct Interpreter {
 }
 
 impl Interpreter {
-    pub fn new(mut environment: Box<dyn Environment>, locals: Locals) -> Self {
-        environment.push();
+    pub fn new(environment: Box<dyn Environment>, locals: Locals) -> Self {
         Self {
             environment,
             locals,
@@ -31,8 +30,7 @@ impl Interpreter {
         }
     }
 
-    pub fn new_without_resolver(mut environment: Box<dyn Environment>) -> Self {
-        environment.push();
+    pub fn new_without_resolver(environment: Box<dyn Environment>) -> Self {
         Self {
             environment,
             locals: Rc::new(HashMap::new()),
@@ -132,8 +130,7 @@ impl Interpreter {
                 };
                 let function_name = lox_function.function.name.clone();
                 self.environment
-                    .define(function_name, Value::Function(lox_function));
-
+                    .define(function_name.clone(), Value::Function(lox_function));
                 Ok(())
             }
             Stmt::Return(stmt) => {
@@ -536,7 +533,7 @@ impl Interpreter {
             args.push(tmp);
         }
 
-        let c_v = &mut *callee_value.borrow_mut();
+        let c_v = &*callee_value.borrow();
         let out = match c_v {
             Value::Function(callable) => callable.call(args),
             Value::NativeFunction(callable) => callable.call(args),
@@ -608,11 +605,7 @@ mod tests {
 
     use super::Interpreter;
     use crate::{
-        interpreting::{
-            environment::{RefCellEnvironment, SingleCopyEnvironment},
-            interpreter::Value,
-            RuntimeError,
-        },
+        interpreting::{environment::RefCellEnvironment, interpreter::Value, RuntimeError},
         parsing::{
             BinaryOperator, BlockStatement, Expr, FunctionStatement, IfStatement, ReturnStatement,
             SaveExpression, Stmt, Variable, VariableDeclaration,
@@ -824,12 +817,14 @@ mod tests {
         //     x = x + 1;
         //     <SAVE VALUE OF x>
         //   }
+        //   return inner;
         // }
-        // f = outer();
+        // var f = outer();
         // f();
         // f();
 
         let saved_values: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(vec![]));
+
         // fun inner() {
         //      x = x + 1;
         //      <SAVE VALUE OF x>
@@ -865,6 +860,7 @@ mod tests {
         // fun outer() {
         //     var x = 0.0;
         //     <definition of inner>
+        //     return inner;
         // }
         let outer_function_stmt = Stmt::Function(FunctionStatement {
             name: "outer".to_string(),
@@ -889,7 +885,7 @@ mod tests {
         });
 
         // <definition of outer>
-        // f = outer();
+        // var f = outer();
         // f();
         // f();
         let stmts = vec![
@@ -938,7 +934,6 @@ mod tests {
         match interpreter.execute_statements(stmts.clone()) {
             Ok(_) => {}
             Err(e) => {
-                println!("{e:#?}");
                 panic!("should execute without error")
             }
         };
@@ -950,20 +945,20 @@ mod tests {
         saved_values.borrow_mut().pop();
 
         // If we use the single copy environment, then we find that the value of x is unchanged by the closure.
-        let environment = Box::new(SingleCopyEnvironment::new());
-        let locals = resolve(stmts.clone()).expect("Should resolve without error");
-        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
-        match interpreter.execute_statements(stmts) {
-            Ok(_) => {}
-            Err(e) => {
-                println!("{e:#?}");
-                panic!("should execute without error")
-            }
-        };
-        assert_eq!(
-            saved_values.borrow().clone(),
-            vec![Value::Number(1.0), Value::Number(1.0)]
-        );
+        // let environment = Box::new(SingleCopyEnvironment::new());
+        // let locals = resolve(stmts.clone()).expect("Should resolve without error");
+        // let mut interpreter = Interpreter::new(environment, Rc::new(locals));
+        // match interpreter.execute_statements(stmts) {
+        //     Ok(_) => {}
+        //     Err(e) => {
+        //         println!("{e:#?}");
+        //         panic!("should execute without error")
+        //     }
+        // };
+        // assert_eq!(
+        //     saved_values.borrow().clone(),
+        //     vec![Value::Number(1.0), Value::Number(1.0)]
+        // );
     }
 
     #[test]
@@ -981,16 +976,6 @@ mod tests {
             arguments: vec![],
         })];
         let environment = Box::new(RefCellEnvironment::new());
-        let locals = resolve(stmts.clone()).expect("Should resolve without error");
-        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
-        match interpreter.execute_statements(stmts.clone()) {
-            Ok(_) => {}
-            Err(e) => {
-                println!("{e:#?}");
-                panic!("should execute without error")
-            }
-        };
-        let environment = Box::new(SingleCopyEnvironment::new());
         let locals = resolve(stmts.clone()).expect("Should resolve without error");
         let mut interpreter = Interpreter::new(environment, Rc::new(locals));
         match interpreter.execute_statements(stmts) {
@@ -1019,13 +1004,6 @@ mod tests {
             })),
         ];
         let environment = Box::new(RefCellEnvironment::new());
-        let locals = resolve(stmts.clone()).expect("Should resolve without error");
-        let mut interpreter = Interpreter::new(environment, Rc::new(locals));
-        match interpreter.execute_statements(stmts.clone()) {
-            Ok(_) => panic!("Should throw runtime exception"),
-            Err(RuntimeError { message }) => assert!(message.contains("Undefined variable 'a'")),
-        };
-        let environment = Box::new(SingleCopyEnvironment::new());
         let locals = resolve(stmts.clone()).expect("Should resolve without error");
         let mut interpreter = Interpreter::new(environment, Rc::new(locals));
         match interpreter.execute_statements(stmts) {
