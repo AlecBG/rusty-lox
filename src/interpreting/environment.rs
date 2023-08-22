@@ -1,9 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
-    fmt::Debug,
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
 
 use super::{
     functions::NativeFunction,
@@ -61,6 +56,8 @@ impl Clone for Box<dyn Environment> {
     }
 }
 
+type RefCellEnvironmentStack = Vec<Rc<RefCell<HashMap<String, Rc<RefCell<Value>>>>>>;
+
 /// In this environment we get closures like in say javascript or python.
 /// For example
 /// ```
@@ -74,7 +71,7 @@ impl Clone for Box<dyn Environment> {
 /// This code will print 2.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RefCellEnvironment {
-    values: Vec<Rc<RefCell<HashMap<String, Rc<RefCell<Value>>>>>>,
+    values: RefCellEnvironmentStack,
     pos: usize,
 }
 
@@ -150,10 +147,10 @@ impl Environment for RefCellEnvironment {
                 .insert(name, Rc::new(RefCell::new(value)));
             Ok(())
         } else {
-            return Err(RuntimeError {
+            Err(RuntimeError {
                 message: format!("Undefined variable '{name}'."),
             }
-            .into());
+            .into())
         }
     }
 
@@ -217,7 +214,7 @@ impl Default for RefCellEnvironment {
 pub struct ClosureEnvironment {
     enclosed_environment: Box<dyn Environment>,
     enclosed_environment_depth: usize,
-    values: Vec<Rc<RefCell<HashMap<String, Rc<RefCell<Value>>>>>>,
+    values: RefCellEnvironmentStack,
     pos: usize,
 }
 
@@ -295,10 +292,10 @@ impl Environment for ClosureEnvironment {
                 .insert(name, Rc::new(RefCell::new(value)));
             Ok(())
         } else {
-            return Err(RuntimeError {
+            Err(RuntimeError {
                 message: format!("Undefined variable '{name}'."),
             }
-            .into());
+            .into())
         }
     }
 

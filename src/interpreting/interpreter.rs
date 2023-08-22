@@ -130,7 +130,7 @@ impl Interpreter {
                 };
                 let function_name = lox_function.function.name.clone();
                 self.environment
-                    .define(function_name.clone(), Value::Function(lox_function));
+                    .define(function_name, Value::Function(lox_function));
                 Ok(())
             }
             Stmt::Return(stmt) => {
@@ -306,11 +306,9 @@ impl Interpreter {
                             method.bind(instance.clone(), false),
                         ))))
                     }
-                    _ => {
-                        return Err(RuntimeErrorOrReturnValue::RuntimeError(RuntimeError {
-                            message: "Super lookup was not a class".to_string(),
-                        }))
-                    }
+                    _ => Err(RuntimeErrorOrReturnValue::RuntimeError(RuntimeError {
+                        message: "Super lookup was not a class".to_string(),
+                    })),
                 }
             }
             Expr::Grouping(expression) => self.evaluate(*expression),
@@ -934,6 +932,7 @@ mod tests {
         match interpreter.execute_statements(stmts.clone()) {
             Ok(_) => {}
             Err(e) => {
+                eprintln!("{e:#?}");
                 panic!("should execute without error")
             }
         };
@@ -943,22 +942,6 @@ mod tests {
         );
         saved_values.borrow_mut().pop();
         saved_values.borrow_mut().pop();
-
-        // If we use the single copy environment, then we find that the value of x is unchanged by the closure.
-        // let environment = Box::new(SingleCopyEnvironment::new());
-        // let locals = resolve(stmts.clone()).expect("Should resolve without error");
-        // let mut interpreter = Interpreter::new(environment, Rc::new(locals));
-        // match interpreter.execute_statements(stmts) {
-        //     Ok(_) => {}
-        //     Err(e) => {
-        //         println!("{e:#?}");
-        //         panic!("should execute without error")
-        //     }
-        // };
-        // assert_eq!(
-        //     saved_values.borrow().clone(),
-        //     vec![Value::Number(1.0), Value::Number(1.0)]
-        // );
     }
 
     #[test]

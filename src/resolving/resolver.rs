@@ -76,7 +76,7 @@ impl<'a> Resolver<'a> {
                 self.declare(name.clone())?;
                 self.define(name.clone())?;
                 if let Some(sc) = superclass.clone() {
-                    if &sc == &name {
+                    if sc == name {
                         return Err(ResolverError::new(
                             "A class cannot inherit from itself.".to_string(),
                         ));
@@ -116,7 +116,7 @@ impl<'a> Resolver<'a> {
             Stmt::Var(variable_declaration) => {
                 self.declare(variable_declaration.name.clone())?;
                 self.resolve_expression(variable_declaration.initializer)?;
-                self.define(variable_declaration.name.clone())?;
+                self.define(variable_declaration.name)?;
             }
             Stmt::Function(function_stmt) => {
                 self.declare(function_stmt.name.clone())?;
@@ -262,7 +262,7 @@ impl<'a> Resolver<'a> {
         }
         for i in (0..self.scopes.len()).rev() {
             if self.scopes[i].contains_key(&resolvable_expr.to_string()) {
-                self.locals.insert(resolvable_expr.clone(), i);
+                self.locals.insert(resolvable_expr, i);
                 break;
             }
         }
