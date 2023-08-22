@@ -60,7 +60,7 @@ type RefCellEnvironmentStack = Vec<Rc<RefCell<HashMap<String, Rc<RefCell<Value>>
 
 /// In this environment we get closures like in say javascript or python.
 /// For example
-/// ```
+/// ```lox
 /// var x = 1;
 /// fun f() {
 ///     print x;

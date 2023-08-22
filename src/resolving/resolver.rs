@@ -76,6 +76,7 @@ impl<'a> Resolver<'a> {
                 self.declare(name.clone())?;
                 self.define(name.clone())?;
                 if let Some(sc) = superclass.clone() {
+                    self.current_class_type = ClassType::SubClass;
                     if sc == name {
                         return Err(ResolverError::new(
                             "A class cannot inherit from itself.".to_string(),
@@ -225,9 +226,17 @@ impl<'a> Resolver<'a> {
             Expr::Super {
                 method: _,
                 line_number,
-            } => self.resolve_local(ResolvableExpr::Super {
-                line_number: *line_number,
-            })?,
+            } => match self.current_class_type {
+                ClassType::None => Err(ResolverError::new(
+                    "Cannot use 'super' outside of a class.".to_string(),
+                )),
+                ClassType::Class => Err(ResolverError::new(
+                    "Cannot use 'super' in a class with no superclass.".to_string(),
+                )),
+                ClassType::SubClass => self.resolve_local(ResolvableExpr::Super {
+                    line_number: *line_number,
+                }),
+            }?,
             Expr::Get { object, name: _ } => self.resolve_expression(*object.clone())?,
             Expr::Set {
                 object,
